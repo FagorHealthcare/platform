@@ -28,3 +28,14 @@ md-resi-api-spec/
 *~
 .idea/
 .vscode/
+
+# =====================================================================
+# Terraform — local state, plans, secrets.
+# `.terraform.lock.hcl` IS conventionally committed (provider version
+# pinning for reproducibility) and therefore intentionally NOT listed.
+# =====================================================================
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+terraform/*.tfplan

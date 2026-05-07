@@ -1,0 +1,47 @@
+# =====================================================================
+# terraform.tfvars.example
+#
+# Copy to `terraform.tfvars` and fill in real values before running
+# `terraform plan`. The real `terraform.tfvars` is gitignored; do NOT
+# commit it. Treat it like a credentials file.
+# =====================================================================
+
+# ---- Required: secrets ---------------------------------------------
+
+# DO API token: create under https://cloud.digitalocean.com/account/api/tokens
+# with full read+write scopes for: Droplet, Reserved IP, Firewall, Domain,
+# SSH key, Spaces.
+do_token = "dop_v1_REPLACE_ME" # fill in
+
+# DO Spaces keys: generate under https://cloud.digitalocean.com/account/api/spaces
+# (these are SEPARATE from do_token).
+do_spaces_access_id  = "REPLACE_ME" # fill in
+do_spaces_secret_key = "REPLACE_ME" # fill in
+
+# ---- Required: operator inputs -------------------------------------
+
+# Single-line public key, e.g.:
+#   ssh-ed25519 AAAAC3Nz... operator@laptop
+ssh_public_key = "ssh-ed25519 AAAA_REPLACE_ME operator@laptop" # fill in
+
+# CIDR(s) allowed to reach SSH. Use your home/office public IP /32.
+# Look up with `curl https://ifconfig.me`. Avoid 0.0.0.0/0.
+operator_ssh_source_ips = [
+  "203.0.113.10/32", # fill in (example: home)
+  # "198.51.100.20/32",  # fill in (example: office)
+]
+
+# Real, monitored email — Caddy uses it for ACME registration.
+letsencrypt_email = "ops@fagorhealthcare.com" # fill in
+
+# ---- Optional overrides (defaults are sane) ------------------------
+
+# region                    = "fra1"
+# droplet_size              = "s-2vcpu-4gb"
+# droplet_name              = "md-platform"
+# domain                    = "fmd.fagorhealthcare.com"
+# subdomain_label           = "platform"
+# spaces_bucket_registry    = "platform-registry"
+# spaces_bucket_logs        = "platform-logs"
+# enable_droplet_backups    = true
+# enable_droplet_monitoring = true

@@ -1,0 +1,98 @@
+#cloud-config
+# =====================================================================
+# Platform-tier droplet first-boot configuration.
+#
+# This bootstraps the host to the point where `docker compose up -d`
+# *could* run, but does NOT yet pull or start the platform stack
+# (Caddy + Zot + Loki). Standing up the compose stack — including the
+# Caddyfile, zot-config.json, loki-config.yaml, and any sealed
+# secrets — is a separate, follow-on commit per pillar 06's
+# "Effort breakdown" (Day 2 / Day 3).
+#
+# Reference: docs/migration/06-platform-tier.md
+# =====================================================================
+
+timezone: Europe/Madrid
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - htop
+  - unattended-upgrades
+  - git
+  - rclone
+
+write_files:
+  # -----------------------------------------------------------------
+  # Stub /opt/platform/.env. The follow-on commit replaces / augments
+  # this with the full set of variables the docker-compose stack
+  # consumes (Spaces credentials for Zot, htpasswd path, etc.).
+  # -----------------------------------------------------------------
+  - path: /opt/platform/.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      # Platform-tier docker-compose environment — STUB.
+      # Populated by the follow-on commit that lands the compose stack.
+      LETSENCRYPT_EMAIL=${letsencrypt_email}
+
+      # The follow-on stack will additionally need:
+      #   AWS_ACCESS_KEY_ID         (DO Spaces access id, for Zot S3 driver)
+      #   AWS_SECRET_ACCESS_KEY     (DO Spaces secret, for Zot S3 driver)
+      #   ZOT_HTPASSWD_CI           (bcrypt hash of the `ci` registry user)
+      #   LOKI_S3_ACCESS_KEY_ID     (DO Spaces access id, for Loki backend)
+      #   LOKI_S3_SECRET_ACCESS_KEY (DO Spaces secret, for Loki backend)
+
+  # -----------------------------------------------------------------
+  # Daily cron heartbeat — operator-visible signal that cron is alive.
+  # Real backups (Postgres + K8s descriptors + Spaces mirror) live in
+  # the `md-backup` repo's CronJob, NOT on this droplet.
+  # -----------------------------------------------------------------
+  - path: /etc/cron.daily/platform-snapshot-touch
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/sh
+      # Platform droplet cron heartbeat. If /var/log/platform-snapshot-marker
+      # has not been touched in >24h, cron has stopped working.
+      touch /var/log/platform-snapshot-marker
+
+  # -----------------------------------------------------------------
+  # unattended-upgrades — apply security updates automatically.
+  # -----------------------------------------------------------------
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: "0644"
+    owner: root:root
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+runcmd:
+  # -----------------------------------------------------------------
+  # Install Docker CE from the official Debian apt repo.
+  # -----------------------------------------------------------------
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+      > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # -----------------------------------------------------------------
+  # Enable Docker + unattended-upgrades.
+  # -----------------------------------------------------------------
+  - systemctl enable --now docker
+  - systemctl enable --now unattended-upgrades
+
+  # -----------------------------------------------------------------
+  # Sanity-check the platform working directory exists with sane perms.
+  # The follow-on commit drops the compose file + service configs here.
+  # -----------------------------------------------------------------
+  - install -d -m 0755 -o root -g root /opt/platform

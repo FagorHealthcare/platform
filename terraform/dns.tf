@@ -1,0 +1,34 @@
+# =====================================================================
+# DNS records under the existing `fmd.fagorhealthcare.com` zone.
+#
+# Assumes that zone is already managed by this DigitalOcean account.
+# Verify before first apply:
+#
+#     doctl compute domain list | grep fmd.fagorhealthcare.com
+#
+# If the zone is missing, create it (or delegate to DO from the parent
+# registrar) before running `terraform apply`. We deliberately do NOT
+# manage the zone itself here — applying ownership of an existing,
+# populated zone would risk wiping unrelated records.
+#
+# Records produced (all type A, all → reserved IP):
+#   registry.platform.fmd.fagorhealthcare.com
+#   logs.platform.fmd.fagorhealthcare.com
+# =====================================================================
+
+locals {
+  dns_records = {
+    registry = "registry.${var.subdomain_label}"
+    logs     = "logs.${var.subdomain_label}"
+  }
+}
+
+resource "digitalocean_record" "platform" {
+  for_each = local.dns_records
+
+  domain = var.domain
+  type   = "A"
+  name   = each.value
+  value  = digitalocean_reserved_ip.platform.ip_address
+  ttl    = 300
+}
