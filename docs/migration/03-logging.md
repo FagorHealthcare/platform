@@ -64,7 +64,7 @@ sinks:
   loki:                                   # ← ADDED, same input as ES sink
     type: loki
     inputs: [kubernetes_clean_logs]
-    endpoint: https://logs.platform.fagorhealthcare.com
+    endpoint: https://logs.platform.fmd.fagorhealthcare.com
     encoding:
       codec: json
     labels:
@@ -144,7 +144,7 @@ curl -s -u 'dev-elk:_d3vELK_' \
   | jq '.hits.total.value'
 
 # Loki — count_over_time for the same window
-logcli --addr=https://logs.platform.fagorhealthcare.com \
+logcli --addr=https://logs.platform.fmd.fagorhealthcare.com \
   --username vector-pusher --password "$LOKI_PUSH_PASSWORD" \
   query 'count_over_time({service="md-core",env="pre"}[24h])' \
   --from='2026-05-08T00:00:00Z' --to='2026-05-09T00:00:00Z'
@@ -314,12 +314,12 @@ share one $5/mo base unit. Counted in pillar 06.
 
 For v1 we use **Grafana Cloud's free tier** (10 k metrics + 50 GB
 logs included) as the query frontend, pointing at the self-hosted
-Loki via the public `https://logs.platform.fagorhealthcare.com`
+Loki via the public `https://logs.platform.fmd.fagorhealthcare.com`
 endpoint. No Grafana pod to operate.
 
 If Grafana Cloud's free tier ever becomes insufficient, drop a
 `grafana` service into the platform droplet's `docker compose` stack
-and add a `grafana.platform.fagorhealthcare.com` Caddy route. Out of
+and add a `grafana.platform.fmd.fagorhealthcare.com` Caddy route. Out of
 scope for v1.
 
 Kibana access for AWS ES stays available during the parallel run.
@@ -367,11 +367,11 @@ afternoon.**
   in pillar 06).
 - Author `loki-config.yaml` with the S3 backend pointing at
   `platform-logs` (skeleton in pillar 06).
-- Add the `logs.platform.fagorhealthcare.com` block to the `Caddyfile`.
+- Add the `logs.platform.fmd.fagorhealthcare.com` block to the `Caddyfile`.
 - `docker compose up -d loki caddy && docker compose logs -f loki` to
   watch the first start.
 - Add a *second* Vector sink in both clusters' `vector.yaml`, pointing
-  at `https://logs.platform.fagorhealthcare.com`. Keep the AWS ES sink
+  at `https://logs.platform.fmd.fagorhealthcare.com`. Keep the AWS ES sink
   during the parallel run.
 - Configure Grafana Cloud free tier with a Loki datasource pointing
   at the public endpoint. Add HTTP basic auth on the Caddy side first
@@ -470,7 +470,7 @@ follow-on, not a blocker for this pillar.
 
 ## Done when
 
-- [ ] Platform droplet (pillar 06) is up and `logs.platform.fagorhealthcare.com` resolves to it
+- [ ] Platform droplet (pillar 06) is up and `logs.platform.fmd.fagorhealthcare.com` resolves to it
 - [ ] Loki running on the droplet, fronted by Caddy, S3 backend
       pointing at `platform-logs`
 - [ ] Grafana Cloud free tier configured with the Loki datasource

@@ -13,7 +13,7 @@ live? This pillar exists to record the trade-offs explicitly.
 2. **Do not host platform services in either app cluster.** Pillars 02
    (Zot registry) and 03 (Loki) land on a **dedicated single droplet**
    running `docker compose`, on its own subdomain
-   `*.platform.fagorhealthcare.com`. See [06-platform-tier.md](06-platform-tier.md)
+   `*.platform.fmd.fagorhealthcare.com`. See [06-platform-tier.md](06-platform-tier.md)
    for the full design.
 
 This decision supersedes the earlier "Scenario B" (platform-services-
@@ -168,7 +168,7 @@ Scenario C (dedicated droplet). The reasons:
   updates. The kubelet + control plane + manifests overhead is pure
   tax on these workloads. `docker compose up -d` plus a weekly
   snapshot is the right operational shape.
-- **DNS isolation**: `*.platform.fagorhealthcare.com` becomes a
+- **DNS isolation**: `*.platform.fmd.fagorhealthcare.com` becomes a
   dedicated zone owned by the platform repo's Terraform state.
   Accidental edits to app DNS no longer risk platform availability.
 
@@ -185,7 +185,7 @@ terminated at the platform droplet's Caddy instance. This works because:
 - Both DOKS clusters and the platform droplet live in `fra1`. Latency
   is sub-ms within the DO data centre — even hairpinning out and back.
 - Caddy provisions Let's Encrypt certs automatically for the
-  `*.platform.fagorhealthcare.com` hosts.
+  `*.platform.fmd.fagorhealthcare.com` hosts.
 - Vector → AWS ES today follows the exact same pattern (HTTPS push from
   pre cluster to a sink outside the cluster). We are not introducing a
   novel topology; we are pointing the same pattern at a closer endpoint.
@@ -206,5 +206,5 @@ Things to NOT do:
 - [ ] Pillars 02 and 03 reference Scenario C and place their components
       on the platform droplet accordingly
 - [ ] Pillar 06 (platform tier) implemented
-- [ ] Cross-cluster TLS endpoints (`registry.platform.fagorhealthcare.com`,
-      `logs.platform.fagorhealthcare.com`) documented in `INFRASTRUCTURE.md`
+- [ ] Cross-cluster TLS endpoints (`registry.platform.fmd.fagorhealthcare.com`,
+      `logs.platform.fmd.fagorhealthcare.com`) documented in `INFRASTRUCTURE.md`

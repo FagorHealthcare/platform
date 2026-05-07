@@ -37,7 +37,7 @@ In recommended priority order:
 | # | Pillar | Summary | Net delta |
 |---|---|---|---|
 | [01](01-rightsizing.md) | **Rightsizing** | Drop dev replicas to 1; replace `c-2` in pre with `s-2vcpu-4gb`; optionally consolidate dev nodes. Reversible in minutes. | **−$54/mo** |
-| [06](06-platform-tier.md) | **Platform tier (droplet)** | Dedicated `s-2vcpu-4gb` Debian droplet running `docker compose` (Caddy + Zot + Loki) on `*.platform.fagorhealthcare.com`. Backed by Spaces + AWS S3 DR. Terraform-provisioned. | **+$33/mo** (hosting cost; net negative when paired with 03) |
+| [06](06-platform-tier.md) | **Platform tier (droplet)** | Dedicated `s-2vcpu-4gb` Debian droplet running `docker compose` (Caddy + Zot + Loki) on `*.platform.fmd.fagorhealthcare.com`. Backed by Spaces + AWS S3 DR. Terraform-provisioned. | **+$33/mo** (hosting cost; net negative when paired with 03) |
 | [02](02-registry.md) | **Self-hosted registry** | Zot service in the platform droplet's compose stack, Trivy CVE scanning, Spaces backend, AWS S3 mirror. Replaces DockerHub. | **~$0** (gains scanning + ends hardcoded creds) |
 | [03](03-logging.md) | **Vector → Loki** | Same Vector pipeline, swap the sink. Loki service in the platform droplet, Spaces backend, 365-day retention. | **−$70/mo** |
 | [04](04-cluster-topology.md) | **Cluster topology** | Decision: keep app clusters separate; do **not** host platform services in either app cluster — they live on the dedicated droplet (pillar 06). | **−$0/mo direct** |
@@ -143,13 +143,13 @@ applying it to platform changes keeps the same risk posture.
   [`../../k8s/CLAUDE.md`](../../k8s/CLAUDE.md)) must survive every
   pillar unchanged. No pillar's ingress changes may add
   `cert-manager.io/issuer` to its entry. The platform droplet's Caddy
-  is on a different DNS zone (`*.platform.fagorhealthcare.com`) so
+  is on a different DNS zone (`*.platform.fmd.fagorhealthcare.com`) so
   this concern only applies to the app clusters' NGINX ingress.
 - All migration work must preserve the `<branch>.<run_number>` immutable
   tag contract documented in [`../DEPLOYMENT.md`](../DEPLOYMENT.md).
   Floating tags `dev`/`prod`/`latest` keep their current meaning.
 - `fhctl` integration points (registry, logs) are noted per pillar;
   they are follow-on work, not blockers.
-- The new DNS zone `platform.fagorhealthcare.com` requires a one-time
+- The new DNS zone `platform.fmd.fagorhealthcare.com` requires a one-time
   delegation from the parent `fagorhealthcare.com` zone — see pillar
   06.

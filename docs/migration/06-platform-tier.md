@@ -4,7 +4,7 @@ Status: **proposed** | Estimated savings: **−€48/mo** (replaces AWS ES) | Se
 
 A dedicated **single Debian droplet** running `docker compose` hosts the
 shared platform services (Caddy, Zot, Loki — and any future cross-cluster
-infra) on its own subdomain `*.platform.fagorhealthcare.com`. The two
+infra) on its own subdomain `*.platform.fmd.fagorhealthcare.com`. The two
 DOKS app clusters (`md-dev-cluster`, `md-pre-cluster`) stay untouched.
 
 This is the central pillar of the new architecture: pillars 02 (registry)
@@ -40,7 +40,7 @@ Three options were considered:
                                        │ docker push, docker pull, vector push
                                        ▼
               ┌──────────────────────────────────────────────────┐
-              │  *.platform.fagorhealthcare.com  (Caddy → ACME)  │
+              │  *.platform.fmd.fagorhealthcare.com  (Caddy → ACME)  │
               └──────────────┬─────────────────┬─────────────────┘
                              │                 │
                   registry.platform     logs.platform
@@ -141,12 +141,12 @@ services:
     # Caddy auto-provisions Let's Encrypt certs on first request.
 }
 
-registry.platform.fagorhealthcare.com {
+registry.platform.fmd.fagorhealthcare.com {
     reverse_proxy zot:5000
     # Optional: rate-limit anonymous reads at the edge
 }
 
-logs.platform.fagorhealthcare.com {
+logs.platform.fmd.fagorhealthcare.com {
     reverse_proxy loki:3100
     # Loki's HTTP API expects POSTs from Vector at /loki/api/v1/push;
     # Caddy passes everything through unmodified.
@@ -400,7 +400,7 @@ root of the platform repo. State backend: DO Spaces, separate bucket
 ```
 terraform/
   main.tf          # droplet, reserved IP, cloud firewall
-  dns.tf           # platform.fagorhealthcare.com zone + records
+  dns.tf           # platform.fmd.fagorhealthcare.com zone + records
   spaces.tf        # platform-registry, platform-logs (versioning + lifecycle)
   cloud-init.yml   # apt install docker, clone repo, docker compose up -d
   variables.tf     # ssh_keys, region, sizes
@@ -416,7 +416,7 @@ What gets provisioned:
 | `digitalocean_reserved_ip.platform` | Anchors a stable IP across droplet rebuilds |
 | `digitalocean_reserved_ip_assignment` | Binds it to the droplet |
 | `digitalocean_firewall.platform` | Inbound: 22/tcp from operator IPs only; 80,443/tcp from `0.0.0.0/0`; 22 outbound to anywhere; standard ICMP |
-| `digitalocean_domain.platform` | `platform.fagorhealthcare.com` (NEW zone — needs DNS delegation set up in the Fagor parent zone first) |
+| `digitalocean_domain.platform` | `platform.fmd.fagorhealthcare.com` (NEW zone — needs DNS delegation set up in the Fagor parent zone first) |
 | `digitalocean_record.registry` | A → reserved IP |
 | `digitalocean_record.logs` | A → reserved IP |
 | `digitalocean_spaces_bucket.registry` | `platform-registry`, fra1, versioning on, ACL private |
@@ -450,7 +450,7 @@ runcmd:
 
 ## DNS setup — one-time
 
-The zone `platform.fagorhealthcare.com` does **not exist yet**. Before
+The zone `platform.fmd.fagorhealthcare.com` does **not exist yet**. Before
 the first `terraform apply`:
 
 1. In the parent registrar / DNS zone for `fagorhealthcare.com`, add NS
@@ -466,7 +466,7 @@ edits to app DNS do not affect platform availability and vice versa.
 ### Day 1 — Provisioning
 
 - Write Terraform modules in `terraform/`.
-- Set up DNS delegation for `platform.fagorhealthcare.com`.
+- Set up DNS delegation for `platform.fmd.fagorhealthcare.com`.
 - `terraform init` (Spaces backend), `terraform plan`, `terraform apply`.
 - Verify droplet reachable via reserved IP, DNS resolves, Caddy serves
   a default placeholder over HTTPS.
@@ -476,7 +476,7 @@ edits to app DNS do not affect platform availability and vice versa.
 - Author `zot-config.json`, generate `htpasswd` for the `ci` user, store
   the bcrypt hash in a sealed secret committed to the repo.
 - Bring up Zot in the compose stack, push a smoke image with `docker
-  push registry.platform.fagorhealthcare.com/test:latest`.
+  push registry.platform.fmd.fagorhealthcare.com/test:latest`.
 - Verify Trivy CVE database update fires.
 - Document Spaces credentials in the platform repo's secrets section
   (sealed or via 1Password reference, never in plaintext).
@@ -487,7 +487,7 @@ edits to app DNS do not affect platform availability and vice versa.
   `platform-logs`.
 - Bring up Loki in the compose stack, verify `/ready` and `/metrics`.
 - Point one Vector instance (start with dev cluster's Vector) at
-  `https://logs.platform.fagorhealthcare.com` as a *second* sink (keep
+  `https://logs.platform.fmd.fagorhealthcare.com` as a *second* sink (keep
   AWS ES alongside per pillar 03's parallel-run requirement).
 - Run a representative LogQL query in `logcli` or curl to confirm a
   log line lands and is searchable.
@@ -498,7 +498,7 @@ edits to app DNS do not affect platform availability and vice versa.
 ## Done when
 
 - [ ] `terraform apply` runs cleanly from a fresh checkout
-- [ ] DNS resolves for `*.platform.fagorhealthcare.com`
+- [ ] DNS resolves for `*.platform.fmd.fagorhealthcare.com`
 - [ ] Caddy serves valid Let's Encrypt certs for both subdomains
 - [ ] Zot push/pull works from a laptop and from inside both DOKS clusters
 - [ ] Trivy CVE results visible via `/v2/_zot/ext/search?…`

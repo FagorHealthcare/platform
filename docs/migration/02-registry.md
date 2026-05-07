@@ -37,7 +37,7 @@ Three problems with the current DockerHub setup:
                                 │ docker push
                                 ▼
                 ┌──────────────────────────────────────────┐
-                │  registry.platform.fagorhealthcare.com   │
+                │  registry.platform.fmd.fagorhealthcare.com   │
                 │  Caddy (Let's Encrypt) → zot:5000        │
                 └──────────────┬───────────────────────────┘
                                │ on the platform droplet
@@ -162,12 +162,12 @@ Helm/cert-manager friction — just a docker-compose service.
 - Generate `htpasswd` for the `ci` user; commit the bcrypt-hashed
   entry (the hash is not a secret, but the cleartext password is —
   store via Terraform variable / 1Password reference).
-- Add the `registry.platform.fagorhealthcare.com` block to the
+- Add the `registry.platform.fmd.fagorhealthcare.com` block to the
   `Caddyfile` (skeleton in pillar 06).
 - `docker compose up -d zot caddy && docker compose logs -f zot` to
   watch the first start.
 - Verify push/pull manually: `docker login
-  registry.platform.fagorhealthcare.com -u ci`, push a smoke image,
+  registry.platform.fmd.fagorhealthcare.com -u ci`, push a smoke image,
   pull from a pod via a test pull-secret in dev cluster.
 
 ### Step 2 — Cut over a pilot service (~2 h)
@@ -175,7 +175,7 @@ Helm/cert-manager friction — just a docker-compose service.
 - Pick `md-backup` (lowest blast radius — runs as a CronJob, not in
   the serving path).
 - Update its `cd.yaml` to push to
-  `registry.platform.fagorhealthcare.com/md-backup` in parallel to
+  `registry.platform.fmd.fagorhealthcare.com/md-backup` in parallel to
   DockerHub for one cycle, then DockerHub-only off.
 - Add the new registry to `md-dockerhub-regcred` (rename the secret
   to `platform-regcred` for clarity, but keep DockerHub creds
@@ -190,7 +190,7 @@ Helm/cert-manager friction — just a docker-compose service.
   → `md-auth` → `md-core` (most-critical last).
 - After all dev `cd.yaml`s push to Zot, update `release.yml` (Release
   to PROD) to also push to Zot. Pre cluster pulls from
-  `registry.platform.fagorhealthcare.com` over public TLS (same fra1
+  `registry.platform.fmd.fagorhealthcare.com` over public TLS (same fra1
   datacentre, sub-ms latency, no egress charges).
 - **Do not delete DockerHub repositories yet.** Keep them as a
   fallback read-only mirror for at least one full release cycle.
@@ -219,7 +219,7 @@ Helm/cert-manager friction — just a docker-compose service.
   `imagePullSecrets` on the default `ServiceAccount` so new manifests
   inherit it.
 - **NetworkPolicy**: if/when we adopt NetworkPolicies, the pre cluster's
-  egress to `registry.platform.fagorhealthcare.com` must be allowed
+  egress to `registry.platform.fmd.fagorhealthcare.com` must be allowed
   explicitly. For now there are no NPs in place.
 - **The hardcoded DockerHub credential lives on** until step 4 above.
   Do not push the new docs claiming "rotated" until `add_tag.sh` is
@@ -231,7 +231,7 @@ Helm/cert-manager friction — just a docker-compose service.
 - **`cinfa-adhoc-cert` is not affected by this pillar.** No ingress
   entries for `*.cinfa.com` change. (Re-flagging because the registry
   endpoint is on a *different* hostname zone entirely now —
-  `*.platform.fagorhealthcare.com`, not `*.k8s.gailen.net` and not
+  `*.platform.fmd.fagorhealthcare.com`, not `*.k8s.gailen.net` and not
   the app cluster's NGINX. Accidental config bleed across clusters
   is no longer the failure mode to watch for; instead, watch for
   accidental Caddy config edits affecting both routes.)
@@ -254,7 +254,7 @@ These are follow-on tickets, not blockers for the migration itself.
 
 ## Done when
 
-- [ ] Platform droplet (pillar 06) is up and `registry.platform.fagorhealthcare.com` resolves to it
+- [ ] Platform droplet (pillar 06) is up and `registry.platform.fmd.fagorhealthcare.com` resolves to it
 - [ ] All `gailen/*` images mirrored to Zot for at least one release cycle
 - [ ] All `cd.yaml` and `release.yml` workflows push to Zot
 - [ ] `add_tag.sh` rewritten to use `oras` against Zot, hardcoded

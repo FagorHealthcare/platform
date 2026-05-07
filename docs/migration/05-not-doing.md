@@ -157,7 +157,7 @@ superseded by Scenario C (dedicated platform droplet, see
   rolling updates. The kubelet + control plane + manifests overhead
   is pure tax. `docker compose up -d` plus a weekly snapshot is the
   right operational shape.
-- **DNS isolation**: a dedicated `*.platform.fagorhealthcare.com`
+- **DNS isolation**: a dedicated `*.platform.fmd.fagorhealthcare.com`
   zone owned by the platform repo's Terraform state means accidental
   edits to app DNS no longer affect platform availability.
 
