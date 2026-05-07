@@ -1,0 +1,30 @@
+# =====================================================================
+# Sub-repos — each of these directories is an INDEPENDENT git repo with
+# its own remote on github.com/FagorHealthcare/. They MUST NOT be tracked
+# by this meta-repo. Adding any of them would either fail (nested .git)
+# or, worse, accidentally vendor a snapshot of their working tree.
+# =====================================================================
+md-core/
+md-auth/
+md-resi-back/
+md-resi-front/
+md-pwa/
+md-backup/
+k8s/
+do-functions/
+fhctl/
+fmd-manual/
+pruebas-fmd-manual/
+postman-cinfa/
+sync-api-spec/
+md-resi-api-spec/
+
+# =====================================================================
+# Editor / OS noise
+# =====================================================================
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
