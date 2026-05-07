@@ -3,10 +3,6 @@
   "storage": {
     "rootDirectory": "/var/lib/registry",
     "remoteCache": false,
-    "cacheDriver": {
-      "name": "boltdb",
-      "rootdirectory": "/var/lib/registry"
-    },
     "storageDriver": {
       "name": "s3",
       "rootdirectory": "/registry",
@@ -52,10 +48,7 @@
   },
   "extensions": {
     "search": {
-      "enable": true,
-      "cve": {
-        "updateInterval": "24h"
-      }
+      "enable": true
     },
     "scrub": {
       "enable": true,

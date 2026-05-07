@@ -115,6 +115,29 @@ Plumb this into a future `fhctl images cves <service>` command. Initial
 target: just human-readable output. Later: a "block prod deploy if any
 CRITICAL" gate in `release.yml`.
 
+> **DEFERRED — Zot v2.1.5 + S3 backend incompatibility (2026-05-07)**
+>
+> On first bring-up Zot rejected its config with:
+> `failed to enable cve scanning due to incompatibility with remote storage, please disable cve`.
+> Zot's CVE scanner (Trivy DB) requires a local-fs storage backend; with
+> a pure-S3 storage driver the validator hard-fails. Adding a local
+> `cacheDriver` (boltdb) does not satisfy the check — the validator
+> looks at `storageDriver`, not the cache.
+>
+> Workarounds, ordered by ease:
+> 1. **Local storage + rclone sync to Spaces** — switches the chosen
+>    architecture; CVE scanning works; backup is async. Best long-term.
+> 2. **Pin Zot to a version that supports CVE+S3** — needs investigation
+>    in the Zot issue tracker; there may not be one.
+> 3. **Live without CVE scanning** — current state. Search extension is
+>    still enabled (image listing, tag search), only the CVE sub-block
+>    is disabled.
+>
+> Current state: option 3. The `extensions.search.cve` block is removed
+> from `zot/config.json.tmpl`. Re-enabling it requires picking option 1
+> or 2 and is tracked as an open follow-up — NOT a v1 blocker, since
+> the registry itself works and replaces DockerHub for image hosting.
+
 ## Cost delta
 
 | Change | Monthly delta |

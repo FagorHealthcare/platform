@@ -24,7 +24,6 @@ volumes:
   caddy_config:      # Caddy autosaved/admin config
   loki_wal:          # Loki WAL + tsdb local index cache
   zot_rendered:      # Rendered (envsubst'd) zot config — written by init
-  zot_cache:         # Local boltdb cache + trivy DB (CVE scanning needs local fs)
 
 services:
   # -------------------------------------------------------------------
@@ -103,10 +102,6 @@ services:
       # Zot itself does not write to /etc/zot at runtime.
       - zot_rendered:/etc/zot
       - ./zot/htpasswd:/etc/zot/htpasswd:ro
-      # Local cache for the boltdb dedupe index + trivy CVE database.
-      # Zot rejects CVE scanning when storage is purely S3, so we add a
-      # local cacheDriver pointing here (see zot/config.json.tmpl).
-      - zot_cache:/var/lib/registry
     networks:
       - platform
     depends_on:
