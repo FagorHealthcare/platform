@@ -416,9 +416,8 @@ What gets provisioned:
 | `digitalocean_reserved_ip.platform` | Anchors a stable IP across droplet rebuilds |
 | `digitalocean_reserved_ip_assignment` | Binds it to the droplet |
 | `digitalocean_firewall.platform` | Inbound: 22/tcp from operator IPs only; 80,443/tcp from `0.0.0.0/0`; 22 outbound to anywhere; standard ICMP |
-| `digitalocean_domain.platform` | `platform.fmd.fagorhealthcare.com` (NEW zone — needs DNS delegation set up in the Fagor parent zone first) |
-| `digitalocean_record.registry` | A → reserved IP |
-| `digitalocean_record.logs` | A → reserved IP |
+| `digitalocean_record.registry` | In the existing zone `fmd.fagorhealthcare.com`, name `registry.platform`, type A → reserved IP |
+| `digitalocean_record.logs` | In the existing zone `fmd.fagorhealthcare.com`, name `logs.platform`, type A → reserved IP |
 | `digitalocean_spaces_bucket.registry` | `platform-registry`, fra1, versioning on, ACL private |
 | `digitalocean_spaces_bucket.logs` | `platform-logs`, fra1, versioning on, ACL private |
 
@@ -448,18 +447,22 @@ runcmd:
   - systemctl enable --now platform.service
 ```
 
-## DNS setup — one-time
+## DNS setup — locked decision
 
-The zone `platform.fmd.fagorhealthcare.com` does **not exist yet**. Before
-the first `terraform apply`:
+**Records live directly in the existing `fmd.fagorhealthcare.com` zone**,
+which is already a DO-managed domain (verified via `doctl compute domain
+list`). No delegation, no new zone, no parent-registrar coordination —
+Terraform creates two `digitalocean_record` resources with names
+`registry.platform` and `logs.platform`, both type A pointing at the
+reserved IP. FQDNs resolve as `registry.platform.fmd.fagorhealthcare.com`
+and `logs.platform.fmd.fagorhealthcare.com`.
 
-1. In the parent registrar / DNS zone for `fagorhealthcare.com`, add NS
-   records for `platform` delegating to DigitalOcean's nameservers
-   (`ns1.digitalocean.com` etc.).
-2. `terraform apply` then owns the zone end-to-end.
-
-This isolates the platform DNS from the application DNS — accidental
-edits to app DNS do not affect platform availability and vice versa.
+An earlier draft considered a delegated subzone (`platform.fmd…` as a
+new DO domain with NS records pointing at it from the parent). It was
+rejected: at this scale the isolation argument doesn't outweigh the
+extra burocracy. If the platform DNS ever needs to move to a separate
+team's control, promotion to a delegated zone is a 5-minute
+Terraform refactor — keep this option open in design but unused in v1.
 
 ## Effort breakdown (~3 days)
 
