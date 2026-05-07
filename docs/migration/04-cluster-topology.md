@@ -1,19 +1,28 @@
 # Pillar 04 — Cluster Topology
 
-Status: **proposed (decision needed before pillars 02 / 03 land)** | Estimated savings: **−$0 to −$24/mo** | Effort: **architectural decision; minimal direct work** | Risk: **medium (audit/compliance, blast radius)** | Depends on: **none** (but informs 02 and 03)
+Status: **decided** — keep app clusters separate, host platform services on a dedicated droplet (see [06-platform-tier.md](06-platform-tier.md)) | Estimated savings: **−$0/mo direct** (platform-tier savings counted in pillars 03/06) | Effort: **architectural decision; no direct work** | Risk: **low** | Depends on: **none** (but informs 02, 03, and 06)
 
-Should we collapse `md-dev-cluster` and `md-pre-cluster` into a single DOKS
-cluster with namespace-based env separation? This pillar exists to make the
-trade-off explicit and answer the question on paper before action.
+Should we collapse `md-dev-cluster` and `md-pre-cluster` into a single
+DOKS cluster? And: where do shared platform services (registry, logs)
+live? This pillar exists to record the trade-offs explicitly.
 
-**Recommended outcome (TL;DR):** keep the two **app** clusters separate.
-Consolidate the **platform** services that pillars 02 and 03 introduce
-(Zot, Loki, Grafana, optionally cert-manager) into one place — the **dev**
-cluster — instead of running parallel platform stacks per environment.
+**Decided outcome (TL;DR):**
 
-## The question
+1. **Keep `md-dev-cluster` and `md-pre-cluster` as separate DOKS clusters.**
+   No consolidation.
+2. **Do not host platform services in either app cluster.** Pillars 02
+   (Zot registry) and 03 (Loki) land on a **dedicated single droplet**
+   running `docker compose`, on its own subdomain
+   `*.platform.fagorhealthcare.com`. See [06-platform-tier.md](06-platform-tier.md)
+   for the full design.
 
-Two scenarios are on the table:
+This decision supersedes the earlier "Scenario B" (platform-services-
+in-dev-cluster) recommendation. Scenario B is now logged as a rejected
+alternative — see [05-not-doing.md](05-not-doing.md).
+
+## The questions
+
+Three scenarios were considered:
 
 ### Scenario A — Fully unified single cluster
 
@@ -21,17 +30,42 @@ Two scenarios are on the table:
 - Single NGINX ingress controller, single load balancer.
 - Apps share node pool(s).
 
-### Scenario B — Split: keep app clusters, consolidate platform
+### Scenario B — Split apps, platform-in-dev-cluster (originally recommended, now superseded)
 
-- App clusters stay as-is: `md-dev-cluster` for dev workloads, `md-pre-cluster` for prod.
-- New platform components (registry, Loki, Grafana, possibly a shared cert-manager) live in **one** of the existing clusters — the dev one — and are consumed cross-cluster by the prod one.
-- No fully separate "platform cluster" (rejected on cost — see [05-not-doing.md](05-not-doing.md)).
+- App clusters stay split: `md-dev-cluster` for dev, `md-pre-cluster`
+  for prod.
+- Platform components (registry, Loki, Grafana) live in the dev cluster
+  and are consumed cross-cluster by prod.
+
+### Scenario C — Split apps, platform on a dedicated droplet (selected)
+
+- App clusters stay split as in Scenario B.
+- Platform components live on a single fra1 droplet running
+  `docker compose`, on its own DNS zone, with its own backups and IaC.
+- See [06-platform-tier.md](06-platform-tier.md).
 
 ## Honest cost analysis
 
-The savings cap is much smaller than it looks at first glance.
+### Final-state costs (with rightsizing + droplet platform tier)
 
-### If pools were fully shared (Scenario A)
+| Item | Monthly |
+|---|---|
+| `md-dev-cluster` rightsized (4× `s-1vcpu-2gb`) | $48 |
+| `md-pre-cluster` rightsized (3× `s-2vcpu-4gb`) | $72 |
+| Load balancers (4× `lb-small`) | $48 |
+| `md-dev-postgresql` | $15 |
+| `md-pre-postgresql` | $60 |
+| PVCs (3× 5 GiB) | $1.50 |
+| **Apps subtotal** | **~$245** |
+| Platform droplet `s-2vcpu-4gb` | $24 |
+| Droplet weekly snapshot | $3 |
+| Spaces (`platform-registry` + `platform-logs`) | $5 |
+| AWS S3 IA backup (~5 GiB) | ~$1 |
+| **Platform subtotal** | **~$33** |
+| **Total final state** | **~$278** |
+| (vs current ~$304 + AWS ES ~$77 = ~$381) | **−$103/mo** |
+
+### If pools were fully shared (Scenario A — rejected)
 
 | Saving source | Best case |
 |---|---|
@@ -41,11 +75,11 @@ The savings cap is much smaller than it looks at first glance.
 | Drop one managed Postgres? | unlikely — see below |
 | **Theoretical max** | **~$72/mo** |
 
-But: production should not co-tenant with dev on the same node pool. The
-production node pool is sized for prod traffic with a margin; adding dev's
-load means either a bigger pool (negating savings) or accepting that a
-runaway dev pod starves prod. In practice we'd run **separate node pools per
-env** even in Scenario A, so:
+But: production should not co-tenant with dev on the same node pool.
+The production node pool is sized for prod traffic with a margin;
+adding dev's load means either a bigger pool (negating savings) or
+accepting that a runaway dev pod starves prod. In practice we'd run
+**separate node pools per env** even in Scenario A, so:
 
 ### If we keep separate node pools (realistic Scenario A)
 
@@ -57,16 +91,8 @@ env** even in Scenario A, so:
 | Postgres consolidation | **$0** — already one DO Postgres account; both pools live there |
 | **Realistic max** | **~$24/mo** |
 
-### Scenario B (recommended)
-
-| Saving source | Realistic |
-|---|---|
-| Platform services don't duplicate per-env (Zot, Loki, Grafana, cert-manager) | implicit in pillars 02 and 03, already counted there |
-| LBs | **$0** — both clusters keep their LBs |
-| **Direct topology savings** | **~$0** |
-
-So: **the topology change buys at most $24/mo on top of pillars 01–03**,
-and only if we accept real risks documented below.
+So: **the topology change buys at most $24/mo on top of the other
+pillars**, and only if we accept real risks documented below.
 
 ## Risks specific to a fully unified cluster (Scenario A)
 
@@ -119,43 +145,47 @@ This is a quiet but important property of having two clusters. A unified
 cluster forces us to upgrade dev and prod together. We lose the
 canary-by-environment.
 
-### Blast radius of platform services
+## Why Scenario C beats Scenario B (platform in dev cluster)
 
-If platform services (Zot, Loki) live in the *same* cluster as workloads,
-a control-plane incident takes down both at once. Pillar B's
-recommendation places platform services in **dev**, where:
+Scenario B was the previous recommendation. It has been superseded by
+Scenario C (dedicated droplet). The reasons:
 
-- Loss of registry pulls during an incident only affects new pod starts,
-  not running pods. Production keeps running while we fix dev.
-- Loss of logging is degraded observability, not a service outage.
-- Dev cluster failures don't take prod down — the inverse holds too.
+- **Chicken-and-egg on the registry**: a Zot pod whose own image must
+  be pullable for the cluster to recover. Bootstrapping from a fresh
+  cluster requires a public-DockerHub mirror specifically for Zot's
+  own image, which is awkward. A standalone droplet has no such
+  dependency.
+- **Blast radius**: a control-plane or networking incident on the dev
+  cluster simultaneously kills our registry and our logs view of the
+  prod cluster. Decoupling improves the asymmetry — prod can be
+  observed from outside dev, dev can be observed from outside prod.
+- **Audit narrative**: "platform tier on its own host with its own
+  backups and IaC" is a one-line answer in healthcare procurement
+  reviews, cleaner than "platform services share resources with dev
+  apps".
+- **K8s overhead pays for nothing here**: Zot, Loki, Caddy are 3 static
+  services that don't scale, don't reschedule, and don't need rolling
+  updates. The kubelet + control plane + manifests overhead is pure
+  tax on these workloads. `docker compose up -d` plus a weekly
+  snapshot is the right operational shape.
+- **DNS isolation**: `*.platform.fagorhealthcare.com` becomes a
+  dedicated zone owned by the platform repo's Terraform state.
+  Accidental edits to app DNS no longer risk platform availability.
 
-This is the right asymmetry: prod must keep running even when dev is
-broken, but dev can tolerate prod-side issues.
-
-## Recommendation
-
-**Keep `md-dev-cluster` and `md-pre-cluster` separate.** Park platform
-services in `md-dev-cluster`. Specifically:
-
-- **Zot registry** (pillar 02) — runs in dev cluster, exposed at
-  `registry.k8s.gailen.net`. Pre cluster's kubelets pull from it via
-  DNS. Same `fra1` datacentre → no cross-cluster egress charges.
-- **Loki + Grafana** (pillar 03) — run in dev cluster, exposed at
-  `logs.k8s.gailen.net`. Vector in pre cluster pushes to it via TLS
-  ingress, the same way it pushes to AWS ES today.
-- **cert-manager** — stays per-cluster. Consolidating it cross-cluster
-  is more trouble than it's worth and the current setup works.
+The droplet costs ~$33/mo (see [06](06-platform-tier.md) for detail).
+The savings from pillar 03 (~$70/mo from cancelling AWS ES) more than
+cover it; net delta vs the AWS ES status quo is **−$44/mo** while
+gaining vulnerability scanning and 365-day retention.
 
 ## Cross-cluster reach — the practicalities
 
-All three "shared platform" endpoints (registry, logs, future Grafana)
-are HTTPS over the public internet, terminated at the dev cluster's
-ingress controller. This works because:
+All "shared platform" endpoints are HTTPS over the public internet,
+terminated at the platform droplet's Caddy instance. This works because:
 
-- Both clusters live in `fra1`. Latency is sub-ms within the DO data
-  centre — even hairpinning out and back.
-- TLS is already provisioned for `*.k8s.gailen.net` via cert-manager.
+- Both DOKS clusters and the platform droplet live in `fra1`. Latency
+  is sub-ms within the DO data centre — even hairpinning out and back.
+- Caddy provisions Let's Encrypt certs automatically for the
+  `*.platform.fagorhealthcare.com` hosts.
 - Vector → AWS ES today follows the exact same pattern (HTTPS push from
   pre cluster to a sink outside the cluster). We are not introducing a
   novel topology; we are pointing the same pattern at a closer endpoint.
@@ -163,24 +193,18 @@ ingress controller. This works because:
 Things to NOT do:
 
 - **Do not rely on private cluster networking** (e.g. VPC peering)
-  between the two DOKS clusters. DOKS clusters do not natively share a
-  VPC; setting it up is involved and undoes "physically separate"
-  defensibility.
-- **Do not put production on dev's NGINX controller**. They stay
-  separate. Only the *content* (logs, image pulls) crosses.
-
-## Decision: who, when, by what
-
-This pillar is the only one that needs an architectural sign-off rather
-than just engineering work. Recommendation: confirm Scenario B with
-Jorge before pillar 02 or 03 starts, since both place new components
-that will be hard to relocate later.
+  between the two DOKS clusters or between a cluster and the droplet.
+  DOKS clusters do not natively share a VPC; setting it up is involved
+  and undoes "physically separate" defensibility.
+- **Do not host any application workload on the platform droplet.** It
+  is for shared infrastructure only. Application services go in the
+  DOKS clusters.
 
 ## Done when
 
-- [ ] Decision documented in this repo (this file, "Recommendation"
-      section): Scenario B accepted
-- [ ] Pillars 02 and 03 reference Scenario B and place their components
-      in `md-dev-cluster` accordingly
-- [ ] Cross-cluster TLS endpoints (`registry.k8s.gailen.net`,
-      `logs.k8s.gailen.net`) documented in `INFRASTRUCTURE.md`
+- [x] Decision documented in this repo: Scenario C (dedicated droplet)
+- [ ] Pillars 02 and 03 reference Scenario C and place their components
+      on the platform droplet accordingly
+- [ ] Pillar 06 (platform tier) implemented
+- [ ] Cross-cluster TLS endpoints (`registry.platform.fagorhealthcare.com`,
+      `logs.platform.fagorhealthcare.com`) documented in `INFRASTRUCTURE.md`

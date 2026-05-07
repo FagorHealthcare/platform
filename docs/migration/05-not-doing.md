@@ -45,10 +45,11 @@ secrets, no operational burden."
 
 **Why we are not doing it**:
 
-- **Cost**: DOCR Basic is ~$5/mo (capped at 5 GiB) — comparable to
-  pillar 02's Spaces cost. DOCR Pro is ~$20/mo for a higher cap.
-  Pillar 02 self-hosted Zot on Spaces gets us roughly $5/mo storage
-  + ~$1/mo S3 IA mirror = $6/mo, comparable.
+- **Cost**: DOCR Basic is ~$5/mo (capped at 5 GiB), comparable to
+  pillar 02's Spaces cost. DOCR Pro is ~$20/mo for a higher cap. But
+  with pillar 06 in place, the platform droplet *already exists* for
+  Loki — adding Zot to its compose stack is **$0 marginal**. DOCR is
+  strictly more expensive in our final architecture.
 - **No vulnerability scanning at the registry edge.** DOCR does not
   ship Trivy or any built-in scanner. Achieving vuln scanning would
   require a separate scanning pipeline. Zot's Trivy extension solves
@@ -56,14 +57,17 @@ secrets, no operational burden."
 - **No native S3 backup story.** A core design point of pillar 02 is
   that the registry's content lands in a Spaces bucket we control,
   and gets mirrored offsite by an extension of the existing
-  `md-backup` CronJob. DOCR's data lives in DO's tenant infrastructure
-  with no exfiltration path beyond `doctl registry export`.
+  `md-backup` CronJob to AWS S3. DOCR's data lives in DO's tenant
+  infrastructure with no exfiltration path beyond
+  `doctl registry export`.
 - **`add_tag.sh`'s tag-rewriting trick (manifest PUT under a new tag,
   no re-push)** is a generic OCI distribution-spec operation. Zot
   supports it; DOCR's tag handling is opaque. Worth verifying before
   using DOCR if we ever revisit, but not free.
 
-**Verdict**: **rejected**. Loses on scanning + backup control.
+**Verdict**: **rejected**. Loses on scanning + backup control, and
+costs more in net than the chosen architecture given the platform
+droplet already exists for Loki.
 
 ## C. Run Loki separately in each cluster (no cross-cluster ingest)
 
@@ -97,7 +101,9 @@ audit narrative, noisy-neighbour risk, lost canary-by-environment for
 upgrades, shared-ingress blast radius.
 
 **Verdict**: **rejected**. Wrong cost/benefit; the recommendation is
-"keep app clusters separate, consolidate platform services only".
+"keep app clusters separate, host platform services on a dedicated
+droplet" — see [04-cluster-topology.md](04-cluster-topology.md) and
+[06-platform-tier.md](06-platform-tier.md).
 
 ## E. Drop Vector, push directly from app pods to Loki
 
@@ -122,7 +128,45 @@ e.g. `loki-logback-appender`."
 
 **Verdict**: **rejected**. We migrate the sink, not the producer.
 
-## F. Use Postgres for everything (drop managed DBs to one tier)
+## F. Host platform services in the dev cluster (the original "Scenario B")
+
+**The pitch**: "Run Zot, Loki, Grafana as Helm charts in the existing
+`md-dev-cluster`. No new host to operate. Pre cluster reaches them
+cross-cluster via TLS ingress at `*.k8s.gailen.net`."
+
+This was the original recommendation in pillar 04, before being
+superseded by Scenario C (dedicated platform droplet, see
+[06-platform-tier.md](06-platform-tier.md)).
+
+**Why we are not doing it**:
+
+- **Chicken-and-egg on the registry.** A Zot pod in the dev cluster
+  whose image is pulled by the dev cluster's kubelets is fragile
+  during cluster bootstrap and incident recovery. A standalone host
+  has no such dependency.
+- **Blast radius**: a control-plane or networking incident in dev
+  simultaneously kills our registry and our log-query path for prod.
+  A dedicated host decouples the failure domains — prod can be
+  observed even when dev is on fire, and vice versa.
+- **Audit narrative**: "platform tier on its own host with its own
+  backups and IaC" is a one-line answer in healthcare procurement
+  reviews. "Platform services share resources with dev apps" needs
+  explaining.
+- **K8s overhead pays for nothing here.** Zot, Loki, Caddy are 3
+  static services that don't scale, don't reschedule, and don't need
+  rolling updates. The kubelet + control plane + manifests overhead
+  is pure tax. `docker compose up -d` plus a weekly snapshot is the
+  right operational shape.
+- **DNS isolation**: a dedicated `*.platform.fagorhealthcare.com`
+  zone owned by the platform repo's Terraform state means accidental
+  edits to app DNS no longer affect platform availability.
+
+**Verdict**: **rejected**. The droplet (pillar 06) is cleaner on
+every axis except "no new host to operate", and the operational cost
+of a single Debian box with `docker compose` and `unattended-upgrades`
+is genuinely small.
+
+## G. Use Postgres for everything (drop managed DBs to one tier)
 
 **The pitch**: "Two managed Postgres clusters cost $75/mo combined.
 Could we run a single self-managed Postgres on a $24 droplet for
@@ -153,7 +197,8 @@ Triggers that would justify reconsidering each:
 | C — Loki per cluster | A regulatory finding requires logs to never leave their cluster of origin |
 | D — Single cluster | Cinfa or another partner explicitly accepts logical isolation, *and* we have ResourceQuotas / NetworkPolicy / PriorityClass infrastructure already in place for unrelated reasons |
 | E — Direct push to Loki | Vector is deprecated or its operational cost grows materially |
-| F — Self-managed Postgres | DO managed Postgres pricing changes by ≥2× *or* we hit a DO Postgres feature limit (e.g. logical replication shape we can't get) |
+| F — Platform in dev cluster | The platform droplet operationally fails (e.g. repeated `unattended-upgrades` breakage) *and* we add a third DOKS cluster for unrelated reasons |
+| G — Self-managed Postgres | DO managed Postgres pricing changes by ≥2× *or* we hit a DO Postgres feature limit (e.g. logical replication shape we can't get) |
 
 If you are reading this because you are about to revisit one of these,
 note your reasoning in the relevant pillar file before acting.

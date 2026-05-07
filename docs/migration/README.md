@@ -1,17 +1,19 @@
 # Infrastructure Migration Plan
 
-A pragmatic, multi-pillar plan to reduce the platform's monthly run-rate from
-**~€355** to **~€220–250** while improving the security posture (vulnerability
-scanning at the registry, fewer hardcoded credentials, off-cloud log archive).
+A pragmatic, multi-pillar plan to reduce the platform's monthly run-rate
+while improving the security posture (vulnerability scanning at the
+registry, fewer hardcoded credentials, off-cloud log archive) and the
+reliability posture (no more silent log-ingest drops, controlled
+retention).
 
-Status: **proposed**. Nothing in here has been executed. Each pillar is a
-self-contained file that can be picked up and worked on independently, but
-some unblock others — see "Sequencing" below.
+Status: **proposed**. Nothing in here has been executed. Each pillar is
+a self-contained file that can be picked up and worked on independently,
+but some unblock others — see "Sequencing" below.
 
 ## Current monthly cost
 
-Verified via `doctl` against the live DigitalOcean account; AWS figure from
-the most recent invoice.
+Verified via `doctl` against the live DigitalOcean account; AWS figure
+from the most recent invoice.
 
 | Item | Detail | Approx. cost |
 |---|---|---|
@@ -21,62 +23,83 @@ the most recent invoice.
 | `md-dev-postgresql` | `db-s-1vcpu-1gb` managed Postgres | $15 |
 | `md-pre-postgresql` | `db-s-2vcpu-4gb` managed Postgres | $60 |
 | PVCs | 3× 5 GiB block storage (NodeRed/n8n state) | $1.5 |
-| AWS Elasticsearch | log sink for both clusters | €70 |
+| AWS Elasticsearch | log sink for both clusters (218 MiB used / 49 GiB allocated) | ~$77 / €70 |
 | DockerHub | `gailen/*` images (build + pulls) | $5–10 |
 | **Total** | | **~$390 / €355** |
 
-DOKS standard control planes are free. HA control plane (not used) would add
-$40/mo per cluster.
+DOKS standard control planes are free. HA control plane (not used)
+would add $40/mo per cluster.
 
-## The five pillars
+## The six pillars
 
-In recommended priority order (cheapest-first / lowest-risk-first, then by
-size of saving):
+In recommended priority order:
 
 | # | Pillar | Summary | Net delta |
 |---|---|---|---|
 | [01](01-rightsizing.md) | **Rightsizing** | Drop dev replicas to 1; replace `c-2` in pre with `s-2vcpu-4gb`; optionally consolidate dev nodes. Reversible in minutes. | **−$54/mo** |
-| [02](02-registry.md) | **Self-hosted registry** | Zot + DO Spaces backend, Trivy CVE scanning, S3 IA mirror via `md-backup`. Replaces DockerHub. | **~$0** (gains scanning + ends hardcoded creds) |
-| [03](03-logging.md) | **Vector → Loki** | Same Vector pipeline, swap the sink. Loki monolithic on Spaces. | **−$70/mo** |
-| [04](04-cluster-topology.md) | **Cluster topology** | Keep app clusters separate; consolidate **platform** services (registry, logs, cert-manager) into one. | **−$0 to −$24/mo** |
-| [05](05-not-doing.md) | **Things explicitly rejected** | DOKS → k3s, DO Container Registry, Loki-per-cluster, single unified cluster. | n/a |
+| [06](06-platform-tier.md) | **Platform tier (droplet)** | Dedicated `s-2vcpu-4gb` Debian droplet running `docker compose` (Caddy + Zot + Loki) on `*.platform.fagorhealthcare.com`. Backed by Spaces + AWS S3 DR. Terraform-provisioned. | **+$33/mo** (hosting cost; net negative when paired with 03) |
+| [02](02-registry.md) | **Self-hosted registry** | Zot service in the platform droplet's compose stack, Trivy CVE scanning, Spaces backend, AWS S3 mirror. Replaces DockerHub. | **~$0** (gains scanning + ends hardcoded creds) |
+| [03](03-logging.md) | **Vector → Loki** | Same Vector pipeline, swap the sink. Loki service in the platform droplet, Spaces backend, 365-day retention. | **−$70/mo** |
+| [04](04-cluster-topology.md) | **Cluster topology** | Decision: keep app clusters separate; do **not** host platform services in either app cluster — they live on the dedicated droplet (pillar 06). | **−$0/mo direct** |
+| [05](05-not-doing.md) | **Things explicitly rejected** | DOKS → k3s, DO Container Registry, Loki-per-cluster, single unified cluster, platform-services-in-dev-cluster. | n/a |
 
-Cumulative target: **−~€105/mo** (~30%) without losing capability, with two
-non-monetary wins (vulnerability scanning at the registry, decommissioning the
-hardcoded DockerHub credential in `add_tag.sh`).
+Cumulative final state: **~$278/mo** vs **~$381/mo** today (DOKS +
+AWS ES) — **net −$103/mo (~−27%)** while gaining vulnerability
+scanning at the registry, decommissioning the hardcoded DockerHub
+credential in `add_tag.sh`, gaining 365-day controlled log retention,
+and putting platform services on a dedicated host with terraformed IaC
+and dual-cloud DR.
+
+### Final-state cost breakdown
+
+| Item | Monthly |
+|---|---|
+| `md-dev-cluster` rightsized | $48 |
+| `md-pre-cluster` rightsized | $72 |
+| Load balancers (4×) | $48 |
+| Postgres (dev + pre) | $75 |
+| PVCs | $1.50 |
+| Platform droplet | $24 |
+| Droplet weekly snapshot | $3 |
+| Spaces (registry + logs) | $5 |
+| AWS S3 IA backup | ~$1 |
+| DockerHub (canceled) | $0 |
+| AWS ES (canceled) | $0 |
+| **Total** | **~$278/mo** |
 
 ## What we are NOT doing and why
 
-See [05-not-doing.md](05-not-doing.md). The short version: collapsing onto
-self-managed k3s droplets, switching to DO's Container Registry product,
-running a per-cluster Loki, and unifying the two app clusters were each
-considered and rejected for documented reasons. Capture them there before
-revisiting.
+See [05-not-doing.md](05-not-doing.md). The short version: collapsing
+onto self-managed k3s droplets, switching to DO's Container Registry
+product, running a per-cluster Loki, unifying the two app clusters,
+and **hosting platform services inside the dev cluster** were each
+considered and rejected for documented reasons. Capture them there
+before revisiting.
 
 ## Sequencing
 
 ```
-01-rightsizing  ──────►  02-registry  ──────►  03-logging
-   (1 hour)                (~3.5 days)            (~1 day + 30d parallel)
-       │                        │                       │
-       │                        │                       │
-       └────────────────────────┴────────► 04-topology decision
-                                              (informs WHERE 02/03 land)
+01-rightsizing  ──►  06-platform-tier  ──┬──►  02-registry
+   (1 hour)              (~3 days)       │       (~1 day)
+                                         │
+                                         └──►  03-logging
+                                                 (~1 day + 30d parallel)
+04-topology decision: locked (Scenario C — droplet)
 ```
 
 Recommended sequence:
 
-1. **Pillar 01 first.** Free, reversible, and creates ~512 MiB of memory
-   headroom in dev that pillars 02 and 03 will consume.
-2. **Pillar 04 decision second.** It does not require code changes, but it
-   determines *where* the new platform components from pillars 02 and 03 are
-   deployed. Decide before building anything.
-3. **Pillar 02 (registry) third.** Live in parallel with DockerHub for at
-   least one full release cycle on every service before flipping any
-   `imagePullSecrets`.
-4. **Pillar 03 (logging) last.** Run Loki + AWS ES side-by-side for ~30 days
-   so we have apples-to-apples evidence Loki captured everything before we
-   cancel the AWS bill.
+1. **Pillar 01 first.** Free, reversible, and clears compute headroom
+   in dev (useful even if dev no longer needs to host Loki/Zot).
+2. **Pillar 06 second.** Provisions the platform droplet, Spaces
+   buckets, DNS zone, and Caddy. Nothing else can land until this
+   exists.
+3. **Pillars 02 and 03 in either order, after 06.** Both are
+   single-day adds to the platform droplet's compose stack. They are
+   independent of each other; pick whichever is more pressing.
+4. **Pillar 04 is documentation only** — no work product, just records
+   the architectural decision (Scenario C — dedicated droplet)
+   superseding the earlier "platform in dev cluster" recommendation.
 
 Each pillar's file lists its concrete `Depends on:` line at the top.
 
@@ -84,11 +107,16 @@ Each pillar's file lists its concrete `Depends on:` line at the top.
 
 - The **`cinfa-adhoc-cert` DigiCert wildcard** (manual, not cert-manager-
   managed — see [`../OPERATIONS.md`](../OPERATIONS.md) and
-  [`../../k8s/CLAUDE.md`](../../k8s/CLAUDE.md)) must survive every pillar
-  unchanged. No pillar's ingress changes may add `cert-manager.io/issuer`
-  to its entry.
-- All migration work must preserve the `<branch>.<run_number>` immutable tag
-  contract documented in [`../DEPLOYMENT.md`](../DEPLOYMENT.md). Floating
-  tags `dev`/`prod`/`latest` keep their current meaning.
-- `fhctl` integration points (registry, logs) are noted per pillar; they are
-  follow-on work, not blockers.
+  [`../../k8s/CLAUDE.md`](../../k8s/CLAUDE.md)) must survive every
+  pillar unchanged. No pillar's ingress changes may add
+  `cert-manager.io/issuer` to its entry. The platform droplet's Caddy
+  is on a different DNS zone (`*.platform.fagorhealthcare.com`) so
+  this concern only applies to the app clusters' NGINX ingress.
+- All migration work must preserve the `<branch>.<run_number>` immutable
+  tag contract documented in [`../DEPLOYMENT.md`](../DEPLOYMENT.md).
+  Floating tags `dev`/`prod`/`latest` keep their current meaning.
+- `fhctl` integration points (registry, logs) are noted per pillar;
+  they are follow-on work, not blockers.
+- The new DNS zone `platform.fagorhealthcare.com` requires a one-time
+  delegation from the parent `fagorhealthcare.com` zone — see pillar
+  06.
