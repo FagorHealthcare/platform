@@ -4,7 +4,7 @@
 #
 # This bootstraps the host AND clones the platform repo so the compose
 # stack (Caddy + Zot + Loki) is in place under /opt/platform/stack on
-# first SSH. It does NOT auto-`docker compose up` — the operator must
+# first SSH. It does NOT auto-`docker compose up` -- the operator must
 # first supply the `.env` and generate `zot/htpasswd` (both are secrets
 # that live droplet-local and are not committed to git).
 #
@@ -31,7 +31,7 @@ write_files:
   # -----------------------------------------------------------------
   # Pre-seeded /opt/platform/.env. Has the Let's Encrypt email already
   # filled in (from terraform.tfvars) but leaves the DO Spaces
-  # credentials as placeholders — those are operator inputs.
+  # credentials as placeholders -- those are operator inputs.
   #
   # When the compose stack is brought up, /opt/platform/stack/.env is
   # a symlink to this file, so the operator only needs to edit ONE
@@ -48,13 +48,13 @@ write_files:
       # Caddy
       LETSENCRYPT_EMAIL=${letsencrypt_email}
 
-      # Zot — DO Spaces (registry blobs)
+      # Zot -- DO Spaces (registry blobs)
       SPACES_ENDPOINT=https://fra1.digitaloceanspaces.com
       SPACES_REGION=fra1
       SPACES_ACCESS_KEY=
       SPACES_SECRET_KEY=
 
-      # Loki — DO Spaces (log chunks)
+      # Loki -- DO Spaces (log chunks)
       LOKI_S3_BUCKET=platform-logs
       LOKI_S3_REGION=fra1
       LOKI_S3_ACCESS_KEY=
@@ -62,7 +62,7 @@ write_files:
 
   # -----------------------------------------------------------------
   # MOTD pointing operators at the first-time setup runbook.
-  # The compose stack does NOT auto-start — it needs droplet-local
+  # The compose stack does NOT auto-start -- it needs droplet-local
   # secrets (.env + zot/htpasswd) that the operator supplies on first
   # SSH.
   # -----------------------------------------------------------------
@@ -71,7 +71,7 @@ write_files:
     owner: root:root
     content: |
       ============================================================
-      Fagor Healthcare — platform-tier droplet
+      Fagor Healthcare -- platform-tier droplet
       ============================================================
       Stack lives at:  /opt/platform/stack
       First-time setup runbook:
@@ -86,7 +86,7 @@ write_files:
       ============================================================
 
   # -----------------------------------------------------------------
-  # Daily cron heartbeat — operator-visible signal that cron is alive.
+  # Daily cron heartbeat -- operator-visible signal that cron is alive.
   # Real backups (Postgres + K8s descriptors + Spaces mirror) live in
   # the `md-backup` repo's CronJob, NOT on this droplet.
   # -----------------------------------------------------------------
@@ -100,7 +100,7 @@ write_files:
       touch /var/log/platform-snapshot-marker
 
   # -----------------------------------------------------------------
-  # unattended-upgrades — apply security updates automatically.
+  # unattended-upgrades -- apply security updates automatically.
   # -----------------------------------------------------------------
   - path: /etc/apt/apt.conf.d/20auto-upgrades
     permissions: "0644"
