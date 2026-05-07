@@ -97,7 +97,10 @@ services:
     expose:
       - "5000"
     volumes:
-      - zot_rendered:/etc/zot:ro
+      # /etc/zot is rw because we mount htpasswd as a nested file inside it;
+      # Docker cannot create a nested mountpoint underneath a :ro mount.
+      # Zot itself does not write to /etc/zot at runtime.
+      - zot_rendered:/etc/zot
       - ./zot/htpasswd:/etc/zot/htpasswd:ro
     networks:
       - platform
