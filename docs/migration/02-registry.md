@@ -115,28 +115,37 @@ Plumb this into a future `fhctl images cves <service>` command. Initial
 target: just human-readable output. Later: a "block prod deploy if any
 CRITICAL" gate in `release.yml`.
 
-> **DEFERRED — Zot v2.1.5 + S3 backend incompatibility (2026-05-07)**
+> **STORAGE: local disk on droplet, nightly mirror to Spaces (2026-05-08)**
 >
-> On first bring-up Zot rejected its config with:
-> `failed to enable cve scanning due to incompatibility with remote storage, please disable cve`.
-> Zot's CVE scanner (Trivy DB) requires a local-fs storage backend; with
-> a pure-S3 storage driver the validator hard-fails. Adding a local
-> `cacheDriver` (boltdb) does not satisfy the check — the validator
-> looks at `storageDriver`, not the cache.
+> Zot's validator (`pkg/cli/server/root.go:353`, present since v2.0.0-rc6,
+> Sept 2023) hard-rejects CVE scanning whenever **any** `storageDriver`
+> is set — at the root or any subPath. Trivy's DB needs a real POSIX
+> filesystem with `chmod` support; an S3-backed image-store is fundamentally
+> incompatible with inline scanning. The cacheDriver is unrelated (it
+> caches metadata, not blobs) and does not satisfy the check.
 >
-> Workarounds, ordered by ease:
-> 1. **Local storage + rclone sync to Spaces** — switches the chosen
->    architecture; CVE scanning works; backup is async. Best long-term.
-> 2. **Pin Zot to a version that supports CVE+S3** — needs investigation
->    in the Zot issue tracker; there may not be one.
-> 3. **Live without CVE scanning** — current state. Search extension is
->    still enabled (image listing, tag search), only the CVE sub-block
->    is disabled.
+> Maintainer-recommended pattern (per
+> [zotregistry.dev/articles/cve-scanning](https://zotregistry.dev/v2.1.15/articles/cve-scanning/)):
+> *"a CVE repository with a zot instance outside of the cluster using
+> a local disk for storage."*
 >
-> Current state: option 3. The `extensions.search.cve` block is removed
-> from `zot/config.json.tmpl`. Re-enabling it requires picking option 1
-> or 2 and is tracked as an open follow-up — NOT a v1 blocker, since
-> the registry itself works and replaces DockerHub for image hosting.
+> Adopted architecture:
+>
+> - Zot writes to `/var/lib/registry` on the droplet (docker named
+>   volume `zot_data`). 80 GB disk, ~30 GB target: ample headroom.
+> - Snapshots: DO weekly droplet snapshots (already on, see terraform).
+> - Offsite DR: nightly `rclone sync /var/lib/registry → spaces:md-platform-registry`,
+>   handled by the `md-spaces-mirror-cronjob` (see pillar 02 follow-up
+>   and pillar 06).
+> - CVE scanning: enabled inline via `extensions.search.cve` — Trivy
+>   DB downloads on first start (~500 MB), refreshes daily.
+>
+> Trade-off: lose live multi-region durability at the registry layer
+> (a single droplet failure = registry down until restore). Acceptable
+> because (a) the registry only serves CI/CD pulls, not user traffic;
+> (b) re-provisioning the droplet from terraform + restoring blobs from
+> Spaces is < 30 min; (c) DockerHub remains as a parallel push target
+> during the migration window so a Zot outage cannot block deploys.
 
 ## Cost delta
 
