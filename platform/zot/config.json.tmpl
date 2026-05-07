@@ -3,6 +3,10 @@
   "storage": {
     "rootDirectory": "/var/lib/registry",
     "remoteCache": false,
+    "cacheDriver": {
+      "name": "boltdb",
+      "rootdirectory": "/var/lib/registry"
+    },
     "storageDriver": {
       "name": "s3",
       "rootdirectory": "/registry",
