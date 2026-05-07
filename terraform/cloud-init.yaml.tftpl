@@ -2,14 +2,24 @@
 # =====================================================================
 # Platform-tier droplet first-boot configuration.
 #
-# This bootstraps the host AND clones the platform repo so the compose
-# stack (Caddy + Zot + Loki) is in place under /opt/platform/stack on
-# first SSH. It does NOT auto-`docker compose up` -- the operator must
-# first supply the `.env` and generate `zot/htpasswd` (both are secrets
-# that live droplet-local and are not committed to git).
+# Bootstraps the host AND brings the compose stack (Caddy + Zot + Loki)
+# up to a healthy state without operator intervention. This is a
+# "terraform apply and walk away" provisioning flow:
+#
+#   1. install Docker + base packages
+#   2. clone the platform repo (public)
+#   3. write /opt/platform/.env from terraform-supplied values
+#   4. generate random Zot passwords + htpasswd
+#   5. record the generated passwords in /root/platform-credentials.txt
+#   6. docker compose up -d
+#
+# After this finishes, the operator's only remaining responsibility is
+# to capture /root/platform-credentials.txt (the random Zot passwords
+# for `ci` and `cluster` users) and store them somewhere durable -- the
+# file lives on the droplet only.
 #
 # Reference: docs/migration/06-platform-tier.md
-#            platform/README.md (operator first-time setup)
+#            platform/README.md
 # =====================================================================
 
 timezone: Europe/Madrid
@@ -25,46 +35,42 @@ packages:
   - unattended-upgrades
   - git
   - rclone
-  - apache2-utils    # provides htpasswd, used to generate zot/htpasswd
+  - apache2-utils    # provides htpasswd
+  - pwgen            # provides predictable random password generation
 
 write_files:
   # -----------------------------------------------------------------
-  # Pre-seeded /opt/platform/.env. Has the Let's Encrypt email already
-  # filled in (from terraform.tfvars) but leaves the DO Spaces
-  # credentials as placeholders -- those are operator inputs.
-  #
-  # When the compose stack is brought up, /opt/platform/stack/.env is
-  # a symlink to this file, so the operator only needs to edit ONE
-  # file regardless of which path they `cd` to.
+  # /opt/platform/.env -- fully populated from terraform.tfvars.
+  # No placeholders; the stack should come up green on first boot.
   # -----------------------------------------------------------------
   - path: /opt/platform/.env
     permissions: "0600"
     owner: root:root
     content: |
       # Platform-tier docker-compose environment.
-      # Pre-seeded by terraform cloud-init; fill in the placeholders
-      # before `docker compose up -d`. See platform/README.md.
+      # Materialized by terraform cloud-init from terraform.tfvars.
+      # Do not edit by hand: the next `terraform apply -replace` will
+      # overwrite this file. Change values in terraform.tfvars and
+      # re-apply instead.
 
       # Caddy
       LETSENCRYPT_EMAIL=${letsencrypt_email}
 
       # Zot -- DO Spaces (registry blobs)
-      SPACES_ENDPOINT=https://fra1.digitaloceanspaces.com
-      SPACES_REGION=fra1
-      SPACES_ACCESS_KEY=
-      SPACES_SECRET_KEY=
+      SPACES_ENDPOINT=https://${region}.digitaloceanspaces.com
+      SPACES_REGION=${region}
+      SPACES_BUCKET_REGISTRY=${spaces_bucket_registry}
+      SPACES_ACCESS_KEY=${do_spaces_access_id}
+      SPACES_SECRET_KEY=${do_spaces_secret_key}
 
       # Loki -- DO Spaces (log chunks)
-      LOKI_S3_BUCKET=platform-logs
-      LOKI_S3_REGION=fra1
-      LOKI_S3_ACCESS_KEY=
-      LOKI_S3_SECRET_KEY=
+      LOKI_S3_BUCKET=${spaces_bucket_logs}
+      LOKI_S3_REGION=${region}
+      LOKI_S3_ACCESS_KEY=${do_spaces_access_id}
+      LOKI_S3_SECRET_KEY=${do_spaces_secret_key}
 
   # -----------------------------------------------------------------
-  # MOTD pointing operators at the first-time setup runbook.
-  # The compose stack does NOT auto-start -- it needs droplet-local
-  # secrets (.env + zot/htpasswd) that the operator supplies on first
-  # SSH.
+  # MOTD -- post-bootstrap orientation.
   # -----------------------------------------------------------------
   - path: /etc/motd
     permissions: "0644"
@@ -73,34 +79,25 @@ write_files:
       ============================================================
       Fagor Healthcare -- platform-tier droplet
       ============================================================
-      Stack lives at:  /opt/platform/stack
-      First-time setup runbook:
-                       /opt/platform/stack/README.md
-                       (section "First-time setup on the droplet")
-      Quick start:
-        cd /opt/platform/stack
-        $EDITOR .env                       # pre-seeded; fill secrets
-        htpasswd -Bc zot/htpasswd ci
-        htpasswd -B  zot/htpasswd cluster
-        docker compose up -d
+      Stack:        /opt/platform/stack       (compose up -d on boot)
+      Env file:     /opt/platform/.env        (rendered by terraform)
+      Zot creds:    /root/platform-credentials.txt   (capture once!)
+      Status:       cd /opt/platform/stack && docker compose ps
+      Logs:         docker compose -f /opt/platform/stack/docker-compose.yml logs -f
       ============================================================
 
   # -----------------------------------------------------------------
-  # Daily cron heartbeat -- operator-visible signal that cron is alive.
-  # Real backups (Postgres + K8s descriptors + Spaces mirror) live in
-  # the `md-backup` repo's CronJob, NOT on this droplet.
+  # Daily cron heartbeat.
   # -----------------------------------------------------------------
   - path: /etc/cron.daily/platform-snapshot-touch
     permissions: "0755"
     owner: root:root
     content: |
       #!/bin/sh
-      # Platform droplet cron heartbeat. If /var/log/platform-snapshot-marker
-      # has not been touched in >24h, cron has stopped working.
       touch /var/log/platform-snapshot-marker
 
   # -----------------------------------------------------------------
-  # unattended-upgrades -- apply security updates automatically.
+  # unattended-upgrades.
   # -----------------------------------------------------------------
   - path: /etc/apt/apt.conf.d/20auto-upgrades
     permissions: "0644"
@@ -110,9 +107,84 @@ write_files:
       APT::Periodic::Unattended-Upgrade "1";
       APT::Periodic::AutocleanInterval "7";
 
+  # -----------------------------------------------------------------
+  # /usr/local/sbin/platform-bootstrap.sh -- the one script that owns
+  # the full first-boot bring-up. Lives on disk (not inline in runcmd)
+  # so it can also be re-run for diagnostics: `bash -x platform-bootstrap.sh`.
+  # -----------------------------------------------------------------
+  - path: /usr/local/sbin/platform-bootstrap.sh
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      log() { echo "[platform-bootstrap] $*"; }
+
+      REPO_DIR=/opt/platform-repo
+      STACK_LINK=/opt/platform/stack
+      ENV_LINK=/opt/platform/stack/.env
+      ENV_REAL=/opt/platform/.env
+      CREDS_FILE=/root/platform-credentials.txt
+      HTPASSWD_FILE=/opt/platform-repo/platform/zot/htpasswd
+
+      # -------- 1. Clone repo (idempotent) -----------------------
+      if [ ! -d "$REPO_DIR/.git" ]; then
+        log "cloning platform repo"
+        git clone --depth 1 https://github.com/FagorHealthcare/platform.git "$REPO_DIR"
+      else
+        log "repo already cloned, pulling latest"
+        git -C "$REPO_DIR" pull --ff-only || true
+      fi
+
+      # -------- 2. Symlinks --------------------------------------
+      install -d -m 0755 -o root -g root /opt/platform
+      ln -sfn "$REPO_DIR/platform" "$STACK_LINK"
+      ln -sfn "$ENV_REAL" "$ENV_LINK"
+
+      # -------- 3. Generate htpasswd (idempotent) ----------------
+      if [ ! -f "$HTPASSWD_FILE" ]; then
+        log "generating zot htpasswd + random passwords"
+        CI_PW=$(pwgen -s 32 1)
+        CLUSTER_PW=$(pwgen -s 32 1)
+
+        htpasswd -Bbc "$HTPASSWD_FILE" ci      "$CI_PW"
+        htpasswd -Bb  "$HTPASSWD_FILE" cluster "$CLUSTER_PW"
+        chmod 0644 "$HTPASSWD_FILE"
+
+        umask 077
+        cat > "$CREDS_FILE" <<EOF
+      # Platform-tier registry (Zot) credentials -- generated $(date -Iseconds)
+      #
+      # These were generated on first boot by cloud-init and are NOT
+      # stored anywhere else. Capture them into your password manager
+      # NOW; this file lives droplet-local only.
+      #
+      # ci      -- CI/CD account: read+write+delete on all repos.
+      # cluster -- K8s pull account: read-only.
+      ZOT_USER_CI=ci
+      ZOT_PASS_CI=$CI_PW
+      ZOT_USER_CLUSTER=cluster
+      ZOT_PASS_CLUSTER=$CLUSTER_PW
+      EOF
+        chmod 0600 "$CREDS_FILE"
+        log "credentials written to $CREDS_FILE (capture this!)"
+      else
+        log "htpasswd already exists, leaving alone"
+      fi
+
+      # -------- 4. Bring stack up --------------------------------
+      log "docker compose up -d"
+      cd "$STACK_LINK"
+      docker compose pull
+      docker compose up -d
+
+      log "done. compose ps:"
+      docker compose ps
+
 runcmd:
   # -----------------------------------------------------------------
-  # Install Docker CE from the official Debian apt repo.
+  # Install Docker CE.
   # -----------------------------------------------------------------
   - install -m 0755 -d /etc/apt/keyrings
   - curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
@@ -123,28 +195,13 @@ runcmd:
   - apt-get update
   - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  # -----------------------------------------------------------------
-  # Enable Docker + unattended-upgrades.
-  # -----------------------------------------------------------------
   - systemctl enable --now docker
   - systemctl enable --now unattended-upgrades
 
   # -----------------------------------------------------------------
-  # Sanity-check the platform working directory exists with sane perms.
-  # /opt/platform/.env was pre-seeded above by write_files.
+  # Fully automatic stack bring-up. Logs land in
+  #   /var/log/platform-bootstrap.log
+  # so the operator can `tail -f` to follow progress.
   # -----------------------------------------------------------------
   - install -d -m 0755 -o root -g root /opt/platform
-
-  # -----------------------------------------------------------------
-  # Clone the platform repo and link its stack/ subdir into a
-  # canonical /opt/platform/stack path. The operator's first SSH
-  # then has the compose file + configs already present; only the
-  # secret bits (.env values + zot/htpasswd) remain to be filled in.
-  #
-  # The .env lives at /opt/platform/.env (pre-seeded above) and is
-  # symlinked into the stack dir so docker-compose's `env_file: .env`
-  # finds it without the operator copying it around.
-  # -----------------------------------------------------------------
-  - git clone --depth 1 https://github.com/FagorHealthcare/platform.git /opt/platform-repo
-  - ln -sfn /opt/platform-repo/platform /opt/platform/stack
-  - ln -sfn /opt/platform/.env /opt/platform/stack/.env
+  - bash -x /usr/local/sbin/platform-bootstrap.sh 2>&1 | tee /var/log/platform-bootstrap.log

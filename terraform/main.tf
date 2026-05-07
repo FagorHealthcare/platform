@@ -39,7 +39,12 @@ resource "digitalocean_droplet" "platform" {
   tags = ["platform", "managed-by-terraform"]
 
   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
-    letsencrypt_email = var.letsencrypt_email
+    letsencrypt_email      = var.letsencrypt_email
+    region                 = var.region
+    do_spaces_access_id    = var.do_spaces_access_id
+    do_spaces_secret_key   = var.do_spaces_secret_key
+    spaces_bucket_registry = var.spaces_bucket_registry
+    spaces_bucket_logs     = var.spaces_bucket_logs
   })
 }
 
