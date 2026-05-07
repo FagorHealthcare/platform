@@ -45,7 +45,10 @@ services:
       - platform
     depends_on:
       zot:
-        condition: service_healthy
+        # Zot's published image is distroless (no wget/sh), so the only
+        # honest gate we can apply here is "process started". Real health
+        # is tested end-to-end via Caddy / curl from outside.
+        condition: service_started
       loki:
         condition: service_healthy
     healthcheck:
@@ -107,12 +110,8 @@ services:
     depends_on:
       zot-config-render:
         condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:5000/v2/"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # No healthcheck: the upstream zot image is distroless (no wget/sh,
+    # no curl). End-to-end health is monitored externally via Caddy.
 
   # -------------------------------------------------------------------
   # Loki — monolithic mode. S3-backed chunks (DO Spaces), tsdb index
