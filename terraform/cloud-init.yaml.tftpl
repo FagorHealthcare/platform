@@ -97,6 +97,61 @@ write_files:
       touch /var/log/platform-snapshot-marker
 
   # -----------------------------------------------------------------
+  # Daily cron — rclone the local Zot data (/var/lib/registry, hosted
+  # in the docker named volume zot_data) up to Spaces. This is the
+  # FIRST hop in the offsite chain:
+  #
+  #     /var/lib/registry --(this cron)--> spaces:md-platform-registry
+  #                       --(md-backup)---> s3:<bucket>/spaces-mirror/registry
+  #
+  # Why a chain instead of one direct hop: the s3-side mirror lives
+  # with the rest of the backups (postgres, k8s descriptors) inside the
+  # md-backup CronJob, and md-backup runs in-cluster — it has no access
+  # to the droplet's local FS. The droplet pushes to Spaces (which it
+  # owns and writes anyway for Loki), and md-backup picks it up from
+  # there.
+  # -----------------------------------------------------------------
+  - path: /etc/cron.d/platform-zot-mirror
+    permissions: "0644"
+    owner: root:root
+    content: |
+      # 01:00 UTC daily. Output goes to /var/log/platform-zot-mirror.log.
+      # rclone reads creds from /opt/platform/.env (root-readable).
+      0 1 * * * root /usr/local/sbin/platform-zot-mirror.sh \
+                  >> /var/log/platform-zot-mirror.log 2>&1
+
+  - path: /usr/local/sbin/platform-zot-mirror.sh
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      log() { echo "[zot-mirror $(date -u +%FT%TZ)] $*"; }
+
+      # Source creds from .env (same file already used by docker compose).
+      set -a
+      . /opt/platform/.env
+      set +a
+
+      ZOT_VOLUME=$(docker volume inspect stack_zot_data \
+                     --format '{{.Mountpoint}}')
+      log "mirroring $ZOT_VOLUME -> spaces:$SPACES_BUCKET_REGISTRY"
+
+      export RCLONE_CONFIG_SPACES_TYPE=s3
+      export RCLONE_CONFIG_SPACES_PROVIDER=DigitalOcean
+      export RCLONE_CONFIG_SPACES_ENDPOINT="${SPACES_ENDPOINT#https://}"
+      export RCLONE_CONFIG_SPACES_ACCESS_KEY_ID="$SPACES_ACCESS_KEY"
+      export RCLONE_CONFIG_SPACES_SECRET_ACCESS_KEY="$SPACES_SECRET_KEY"
+
+      rclone sync "$ZOT_VOLUME" "spaces:$SPACES_BUCKET_REGISTRY" \
+        --immutable --checksum \
+        --transfers 4 --checkers 8 \
+        --stats 30s --stats-one-line
+
+      log "done"
+
+  # -----------------------------------------------------------------
   # unattended-upgrades.
   # -----------------------------------------------------------------
   - path: /etc/apt/apt.conf.d/20auto-upgrades
