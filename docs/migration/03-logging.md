@@ -34,29 +34,34 @@ parsing logic for Nginx, Quarkus JSON, and the
 
 ## Target architecture
 
-### Vector config — minimal diff
+### Vector config — two phases
 
-The whole change to `k8s/environments/dev-0/vector/vector.yaml` (and
-the equivalent under `pre/`) is replacing the `gailen_elk_dev` sink:
+The migration runs in two phases. Phase A keeps the AWS ES sink intact
+and **adds** Loki as a second destination; both receive every event
+from the same `kubernetes_clean_logs` source. Phase B (cutover) deletes
+the ES sink. The two phases give us 30 days of side-by-side data to
+validate that Loki receives what ES received — see "Parallel-run
+validation protocol" below.
+
+#### Phase A — parallel run (`vector.yaml` after Day 1)
 
 ```yaml
-# DELETE:
-# sinks:
-#   gailen_elk_dev:
-#     type: elasticsearch
-#     endpoint: https://search-dev-elk-...es.amazonaws.com
-#     pipeline: medicaldispenser
-#     mode: bulk
-#     bulk:
-#       index: medicaldispenser-dev-%Y-%m-%d
-#     auth:
-#       strategy: basic
-#       user: dev-elk
-#       password: _d3vELK_
-
-# ADD:
 sinks:
-  loki:
+  gailen_elk_dev:                         # ← KEEP unchanged during parallel run
+    type: elasticsearch
+    inputs: [kubernetes_clean_logs]
+    endpoint: https://search-dev-elk-...es.amazonaws.com
+    pipeline: medicaldispenser
+    mode: bulk
+    bulk:
+      index: medicaldispenser-dev-%Y-%m-%d
+    compression: gzip
+    auth:
+      strategy: basic
+      user: dev-elk
+      password: _d3vELK_
+
+  loki:                                   # ← ADDED, same input as ES sink
     type: loki
     inputs: [kubernetes_clean_logs]
     endpoint: https://logs.platform.fagorhealthcare.com
@@ -65,19 +70,152 @@ sinks:
     labels:
       service: '{{ kubernetes.container_name }}'
       namespace: '{{ kubernetes.pod_namespace }}'
-      env: dev   # or "pre" in pre's vector.yaml
+      env: dev                            # or "pre" in pre's vector.yaml
       level: '{{ level }}'
-    out_of_order_action: accept   # safe under chunked ingestion
+    out_of_order_action: accept           # matches Loki chunked ingestion
+    compression: snappy
     buffer:
       type: disk
-      max_size: 2147483648   # 2 GiB on-disk buffer per Vector pod
-      when_full: drop_newest
+      max_size: 2147483648                # 2 GiB on-disk buffer per Vector pod
+      when_full: drop_newest              # never block ES delivery on Loki backpressure
+    auth:
+      strategy: basic
+      user: vector-pusher
+      password: ${LOKI_PUSH_PASSWORD}     # from Secret, not hardcoded
+    request:
+      retry_attempts: 3
 ```
+
+Two independent sinks share one source. Each maintains its own buffer.
+**A Loki outage does not affect ES delivery and vice versa** —
+`when_full: drop_newest` on the Loki buffer is the explicit safety belt:
+during the parallel-run window, ES is still the source of truth, so we
+prefer dropping newer Loki events over blocking the pipeline if the new
+Loki instance misbehaves.
 
 Everything else — `parse_nginx_log`, JSON merging, the
 `:U(?P<user>...):B(?P<blister>...):T(?P<treatment>...):S(?P<seguimiento>...):P(?P<phone>...):`
 regex extraction, the `kube-probe` filter — runs identically. Vector
-emits the same enriched event to Loki that it sends to ES today.
+emits the same enriched event to both sinks.
+
+#### Phase B — cutover (`vector.yaml` after Day 31)
+
+Delete the entire `gailen_elk_dev:` block. Update Loki's
+`when_full` from `drop_newest` to `block` (Loki is now the source of
+truth — backpressure should propagate, not silently drop):
+
+```yaml
+sinks:
+  loki:
+    type: loki
+    # ... rest unchanged ...
+    buffer:
+      type: disk
+      max_size: 2147483648
+      when_full: block                    # was drop_newest during parallel run
+```
+
+#### Rollback during parallel run
+
+If anything looks wrong with Loki during Phase A — query gaps,
+unexpected drops, label cardinality explosion — **delete only the
+`loki:` sink block** from `vector.yaml`, reapply the kustomization,
+and the system is back to ES-only. Cost of rollback: zero data loss
+(ES never stopped receiving), zero application impact, ~5 minutes.
+
+### Parallel-run validation protocol
+
+For 30 days, Vector writes the same events to both ES and Loki. The
+purpose of the window is to **answer "is Loki receiving everything ES
+is, with the same fidelity?"** before the destructive cutover. Below
+are the four checks to run, with concrete commands.
+
+#### Check 1 — Daily volume parity
+
+Count events on both sides for the same 24 h window and the same
+service. They should agree within ~1% (asymmetric buffer flushes).
+
+```bash
+# Elasticsearch — count via _count endpoint
+curl -s -u 'dev-elk:_d3vELK_' \
+  "https://search-dev-elk-...es.amazonaws.com/medicaldispenser-pre-2026-05-08/_search?size=0" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":{"term":{"kubernetes.container_name":"md-core"}}}' \
+  | jq '.hits.total.value'
+
+# Loki — count_over_time for the same window
+logcli --addr=https://logs.platform.fagorhealthcare.com \
+  --username vector-pusher --password "$LOKI_PUSH_PASSWORD" \
+  query 'count_over_time({service="md-core",env="pre"}[24h])' \
+  --from='2026-05-08T00:00:00Z' --to='2026-05-09T00:00:00Z'
+```
+
+#### Check 2 — Extracted-field equivalence
+
+Pick one of the regex-extracted fields (`user`, `blister`, etc.) and
+verify Loki returns the same hits as ES for the same value. This
+proves Vector's VRL chain still produces the structured fields that
+the LogQL `| json | user="..."` filter relies on.
+
+```bash
+# Elasticsearch — find docs for a known user
+curl -s -u 'dev-elk:_d3vELK_' \
+  "https://search-dev-elk-...es.amazonaws.com/medicaldispenser-pre-*/_search?size=10" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":{"term":{"user":"alice"}}}' | jq '.hits.total.value'
+
+# Loki — same intent
+logcli ... query \
+  '{service="md-core"} | json | user="alice"' \
+  --from='-24h' --output=raw | wc -l
+```
+
+#### Check 3 — Vector buffer health
+
+Both sinks must keep their buffers near-empty. A growing Loki buffer
+means Loki is slower than the ingest rate — investigate before the
+2 GiB cap is hit.
+
+```bash
+kubectl -n vector exec -t ds/vector -- \
+  curl -s localhost:8686/metrics | \
+  grep -E 'vector_buffer_(events|byte_size)\{component_id="(loki|gailen_elk_dev)"' \
+  | sort
+```
+
+Expected: `vector_buffer_events{component_id="loki"}` < a few hundred
+under steady state. Same for ES. Sustained growth above ~10⁵ is the
+trigger to pause cutover and investigate.
+
+#### Check 4 — Component-level errors and drops
+
+Compare events that entered the pipeline against events that left each
+sink. Any divergence reveals where data is being lost — and at which
+component. The `vector_component_errors_total` metric distinguishes
+*parse-stage* drops (a VRL transform failed, drops on both sides
+identically) from *sink-stage* drops (ES rejected the bulk batch, Loki
+fell behind).
+
+```bash
+kubectl -n vector exec -t ds/vector -- \
+  curl -s localhost:8686/metrics | \
+  grep -E 'vector_(events_in|events_out|component_errors)_total\{component_id="(parse|loki|gailen_elk_dev)"'
+```
+
+Cutover criteria: across both clusters, **for at least 3 consecutive
+days**, every check passes:
+
+- Volume parity ≤ 1% drift, both directions.
+- Field equivalence passes for `user`, `phone`, `blister`, `treatment`,
+  `seguimiento` on a sample of 10 known values.
+- Loki and ES buffers both stable under ~10³ events.
+- Component errors zero on both sinks; any parse-stage errors
+  understood and triaged.
+
+If any check fails, extend the parallel run by another week. There is
+no clock pressure — the cost of an extra parallel-run week is ~€20
+(see "Cost delta" below); the cost of a botched cutover is days of
+operational pain.
 
 ### Reliability improvement vs current AWS ES pipeline
 
@@ -188,6 +326,8 @@ Kibana access for AWS ES stays available during the parallel run.
 
 ## Cost delta
 
+### Steady state (after cutover)
+
 | Change | Monthly delta |
 |---|---|
 | AWS Elasticsearch domain canceled | **−€70 (~−$77)** |
@@ -200,6 +340,24 @@ Kibana access for AWS ES stays available during the parallel run.
 
 The platform droplet hosting cost is accounted in pillar 06, not here,
 to avoid double-counting.
+
+### Transient — parallel-run window (Days 1–30)
+
+During the parallel-run window, BOTH systems are running simultaneously.
+This is a deliberate, time-boxed cost paid for migration safety:
+
+| Item | Monthly while overlap is active |
+|---|---|
+| AWS Elasticsearch (still receiving) | ~$77 |
+| Loki on platform droplet (also receiving) | $0 (sunk into pillar 06) |
+| Spaces and S3 backup | ~$1 |
+| **Total transient overhead vs steady state** | **~+€27/mo** |
+
+A 30-day parallel run therefore costs ~€27 against the steady-state
+projection. If the parallel-run validation protocol (see above)
+extends the window by an extra week, that is ~€20 more. **Cheap
+compared to a destructive cutover that drops production logs for an
+afternoon.**
 
 ## Work breakdown
 

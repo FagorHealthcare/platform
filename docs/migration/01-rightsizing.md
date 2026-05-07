@@ -4,8 +4,10 @@ Status: **proposed** | Estimated savings: **−$54/mo (~€50)** | Effort: **~1h
 
 The cheapest, most boring, most reversible pillar. Almost entirely
 `kubectl scale` and DOKS node-pool resizes — no new components, no
-migration steps. Worth doing first because it (a) starts saving money
-immediately and (b) creates the memory headroom the later pillars need.
+migration steps. **Standalone**: this pillar saves money on its own
+without depending on, or being a prerequisite for, any of the others.
+It is worth doing first only because the savings start immediately and
+the work is reversible in minutes.
 
 ## Motivation
 
@@ -14,9 +16,13 @@ The two clusters are not currently sized for the workload they run.
 - **Dev cluster (`md-dev-cluster`)**: 4× `s-1vcpu-2gb`. Memory utilisation
   is ~81% across the pool. Most services run with `replicas: 2` purely as
   a copy of the production manifests; dev does not need HA. Dropping to
-  `replicas: 1` per service drops memory pressure to ~50%, leaving
-  ~512 MiB headroom on each node — directly useful for pillars 02 (Zot
-  registry) and 03 (Loki) when they land.
+  `replicas: 1` per service drops memory pressure to ~50% — useful for
+  dev's own ergonomics (less eviction risk under build-time spikes,
+  cheaper local testing of resource-heavy operations). Note that under
+  the migration plan, platform services (Zot, Loki) live on a dedicated
+  droplet (see [06-platform-tier.md](06-platform-tier.md)), **not** in
+  the dev cluster — so this rightsizing does not unblock any other
+  pillar; it is standalone operational hygiene.
 - **Pre cluster (`md-pre-cluster`)**: 3× `c-2` CPU-optimised nodes
   ($42/node = $126/mo). CPU utilisation sits at ~3%; the workload is
   bound by memory and I/O, not CPU. Three `s-2vcpu-4gb` general-purpose
@@ -40,7 +46,9 @@ Optional dev consolidation: 4× `s-1vcpu-2gb` (4 vCPU / 8 GiB total) →
 2× `s-2vcpu-4gb` (4 vCPU / 8 GiB total) — same total cost, fewer
 kubelets to babysit, more memory headroom per node, less scheduling
 fragmentation. Net cost change: zero. Operational benefit: real but
-small. Skip if it complicates pillar 02/03's pod scheduling.
+small. Skip if it complicates the existing application workload's
+scheduling (which it shouldn't — same 4 vCPU / 8 GiB total, just
+fewer scheduling boundaries).
 
 ### Pre cluster
 
@@ -97,12 +105,16 @@ Same vCPU count (6), same total RAM (12 GiB), $54/mo cheaper.
   ~5 minutes. Keep the old pool alive (cordoned, drained) for 24 h
   before deleting.
 
-## Why this unblocks pillar 02
+## Relationship to other pillars
 
-Zot + Trivy CVE database fits in ~512 MiB. Once dev is at `replicas: 1`,
-that headroom is freely available without scheduling pressure.
-Otherwise pillar 02 would need to add a node first, eating its own
-savings.
+**None.** This pillar saves money on its own and does not unblock
+or block anything else. Earlier drafts of this plan considered hosting
+Zot and Loki inside the dev cluster, in which case dev's memory
+headroom would have been load-bearing. That design was rejected in
+favour of a dedicated platform droplet (see
+[04-cluster-topology.md](04-cluster-topology.md) and
+[06-platform-tier.md](06-platform-tier.md)). Rightsizing is now purely
+about not paying for compute we don't use.
 
 ## Done when
 

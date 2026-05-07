@@ -79,18 +79,28 @@ before revisiting.
 ## Sequencing
 
 ```
-01-rightsizing  ──►  06-platform-tier  ──┬──►  02-registry
-   (1 hour)              (~3 days)       │       (~1 day)
-                                         │
-                                         └──►  03-logging
-                                                 (~1 day + 30d parallel)
+01-rightsizing  (independent — $54/mo, reversible)
+   (1 hour)
+
+06-platform-tier  ──┬──►  02-registry
+   (~3 days)        │       (~1 day)
+                    │
+                    └──►  03-logging
+                            (~1 day + 30d parallel)
 04-topology decision: locked (Scenario C — droplet)
 ```
 
+01 has no arrow pointing into it because nothing depends on it; it
+runs in parallel with everything else whenever convenient.
+
 Recommended sequence:
 
-1. **Pillar 01 first.** Free, reversible, and clears compute headroom
-   in dev (useful even if dev no longer needs to host Loki/Zot).
+1. **Pillar 01 first.** Standalone cost saving (~$54/mo from the pre
+   node-pool resize alone), reversible in minutes, and unrelated to
+   the rest of the plan. Earlier drafts treated 01 as a prerequisite
+   for hosting platform services in the dev cluster; that design was
+   rejected (see pillar 04). 01 is now first only because it pays
+   back immediately.
 2. **Pillar 06 second.** Provisions the platform droplet, Spaces
    buckets, DNS zone, and Caddy. Nothing else can land until this
    exists.
@@ -102,6 +112,29 @@ Recommended sequence:
    superseding the earlier "platform in dev cluster" recommendation.
 
 Each pillar's file lists its concrete `Depends on:` line at the top.
+
+### Cross-cutting principle: dev-first, validated, then pre
+
+Every change with cluster-side impact lands on `md-dev-cluster` first,
+**stays there long enough to expose the failure modes**, and only then
+moves to `md-pre-cluster`. Pre serves real production traffic
+(`app.fagorhealthcare.com`, `medicaldispenser-sw.cinfa.com`) — its
+risk budget is much smaller than dev's.
+
+How this applies per pillar:
+
+| Pillar | Dev-first action | Bake time before touching pre |
+|---|---|---|
+| **01 rightsizing** | Drop dev replicas to 1 and resize node pool. Watch for OOM, eviction, slow rollouts. | ~3 days of normal traffic. |
+| **06 platform tier** | The droplet is *its own* "dev" — provision it, bring up Caddy + dummies, smoke-test TLS. Nothing in pre is touched. | n/a (host is shared from day 1, but cluster impact is zero until 02/03 land). |
+| **02 registry** | Migrate ONE dev service's `cd.yaml` to push to Zot, validate cluster pulls. Then migrate the rest of dev. | At least 1 successful dev deploy through Zot before changing any `release.yml` for pre. |
+| **03 logging** | Add the Loki sink to **dev's** `vector.yaml` only. Run the validation protocol against dev's traffic for ≥1 week. | Only after dev's parallel-run validation passes do we add the Loki sink to pre's `vector.yaml`. The 30-day cutover clock then runs on pre's data. |
+
+If any pillar's dev-first stage reveals a regression, the rollback is
+local to dev — no impact on pre, no production minutes lost. This is
+the same discipline `release.yml` already encodes for application
+deploys (dev auto-deploys on merge, pre needs an explicit dispatch);
+applying it to platform changes keeps the same risk posture.
 
 ## Cross-cutting concerns
 
