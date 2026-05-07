@@ -1,0 +1,113 @@
+# =====================================================================
+# Loki — monolithic mode, single replica, S3-backed (DO Spaces).
+#
+# Loki is launched with `-config.expand-env=true`, which expands ${VAR}
+# references against the process environment at startup. The env_file
+# directive in docker-compose.yml supplies the SPACES_* variables.
+#
+# Auth model:
+#   - `auth_enabled: false` — Loki itself does NOT enforce auth.
+#   - Loki binds only to the `platform` bridge network and is NOT
+#     reachable from outside the droplet.
+#   - Public access happens through Caddy at logs.platform.fmd.fagorhealthcare.com,
+#     where (when enabled) basic-auth is enforced on the edge.
+#
+# Reference: docs/migration/03-logging.md and 06-platform-tier.md
+# =====================================================================
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: info
+
+# ---------------------------------------------------------------------
+# Common config — single-binary defaults.
+# Storage: S3 chunks (DO Spaces, S3-compatible).
+# Ring: in-memory (single replica only — never set replication_factor>1
+# on a single-node deployment).
+# ---------------------------------------------------------------------
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    s3:
+      endpoint: ${SPACES_ENDPOINT}
+      region: ${LOKI_S3_REGION}
+      bucketnames: ${LOKI_S3_BUCKET}
+      access_key_id: ${LOKI_S3_ACCESS_KEY}
+      secret_access_key: ${LOKI_S3_SECRET_KEY}
+      s3forcepathstyle: false
+      insecure: false
+
+# ---------------------------------------------------------------------
+# Schema — single tsdb-on-s3 block, schema v13.
+#
+# `from` is set to 2026-05-01 (just before the planned rollout date) so
+# that all chunks/indexes Loki ever writes belong to this schema period.
+# If the rollout slips, Loki will still happily accept writes — `from`
+# is the period START, not a requirement that data be at-or-after.
+#
+# WARNING: if you ever need to add a NEW schema period (e.g. migrate to
+# schema v14 in the future), append a second entry with `from:` set to
+# the future cutover date. Do NOT edit this entry's `from:` after data
+# has been ingested — Loki uses it to route reads to the correct
+# storage layout.
+# ---------------------------------------------------------------------
+schema_config:
+  configs:
+    - from: 2026-05-01
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# ---------------------------------------------------------------------
+# Ingester — chunk lifecycle defaults sized for our ~5 MiB/day volume.
+# ---------------------------------------------------------------------
+ingester:
+  wal:
+    enabled: true
+    dir: /loki/wal
+  chunk_idle_period: 1h
+  chunk_target_size: 1572864       # 1.5 MiB — Loki recommended
+  max_chunk_age: 2h
+
+# ---------------------------------------------------------------------
+# Compactor — applies retention by deleting expired chunks from S3.
+# Required for retention to take effect.
+# ---------------------------------------------------------------------
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+  delete_request_store: s3
+
+# ---------------------------------------------------------------------
+# Limits — sized for our ~5 MiB/day with 10× headroom.
+# Stream count is generous for ~5 services × ~5 namespaces × a few
+# levels worth of label combinations; bump later if exceeded.
+# ---------------------------------------------------------------------
+limits_config:
+  retention_period: 8760h          # 365 days (locked decision)
+  ingestion_rate_mb: 4
+  ingestion_burst_size_mb: 6
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h # 7 days
+  max_streams_per_user: 5000
+  max_global_streams_per_user: 5000
+  allow_structured_metadata: true
+
+# ---------------------------------------------------------------------
+# Disable telemetry (no phoning home).
+# ---------------------------------------------------------------------
+analytics:
+  reporting_enabled: false

@@ -39,3 +39,11 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/terraform.tfvars
 terraform/*.tfplan
+
+# =====================================================================
+# Platform stack secrets — droplet-local only, never committed.
+# `.env` carries DO Spaces credentials and the LE email; htpasswd
+# carries bcrypt-hashed registry passwords.
+# =====================================================================
+platform/.env
+platform/zot/htpasswd

@@ -1,0 +1,138 @@
+# =====================================================================
+# Platform-tier docker-compose stack.
+#
+# Runs on the dedicated Debian droplet provisioned by ../terraform/.
+# Services:
+#   - caddy : TLS edge (Let's Encrypt) for *.platform.fmd.fagorhealthcare.com
+#   - zot   : OCI registry (S3 backend → DO Spaces, Trivy CVE scanning)
+#   - loki  : log aggregator (S3 backend → DO Spaces, 365-day retention)
+#
+# Caddy is the ONLY service that publishes ports on the host. Zot and
+# Loki are reachable only via the internal `platform` bridge network.
+# Auth (htpasswd for Zot, basic-auth headers for Loki/Vector) is handled
+# inside each service.
+#
+# Reference: docs/migration/06-platform-tier.md
+# =====================================================================
+
+networks:
+  platform:
+    driver: bridge
+
+volumes:
+  caddy_data:        # ACME certificates + state — persists across restarts
+  caddy_config:      # Caddy autosaved/admin config
+  loki_wal:          # Loki WAL + tsdb local index cache
+  zot_rendered:      # Rendered (envsubst'd) zot config — written by init
+
+services:
+  # -------------------------------------------------------------------
+  # Caddy — TLS edge. Reverse-proxies registry. and logs. virtual hosts
+  # to Zot/Loki on the internal bridge. ACME (HTTP-01) on ports 80/443.
+  # -------------------------------------------------------------------
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - platform
+    depends_on:
+      zot:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      # Caddy's admin API listens on :2019 inside the container by default.
+      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # -------------------------------------------------------------------
+  # zot-config-render — init container.
+  #
+  # Zot does NOT do environment-variable substitution on its config file
+  # natively. We render zot/config.json.tmpl through `envsubst` (from the
+  # gettext package) into a named volume that Zot then reads read-only.
+  #
+  # Trade-off accepted: an init container adds one more moving part vs.
+  # baking a wrapper into a custom Zot image. The init-container path is
+  # picked because it (a) keeps us on the upstream-published Zot image
+  # with no rebuild step, and (b) makes the substitution mechanic
+  # explicit in this compose file rather than hidden in a Dockerfile.
+  # -------------------------------------------------------------------
+  zot-config-render:
+    image: alpine:3.20
+    env_file: .env
+    volumes:
+      - ./zot/config.json.tmpl:/in/config.json.tmpl:ro
+      - zot_rendered:/out
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        apk add --no-cache gettext >/dev/null
+        envsubst < /in/config.json.tmpl > /out/config.json
+        chmod 0444 /out/config.json
+        echo "rendered /out/config.json"
+    restart: "no"
+
+  # -------------------------------------------------------------------
+  # Zot — OCI registry. S3-backed (DO Spaces), htpasswd auth, Trivy
+  # CVE scanning extension. Only reachable via Caddy.
+  # -------------------------------------------------------------------
+  zot:
+    image: ghcr.io/project-zot/zot-linux-amd64:v2.1.5
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "5000"
+    volumes:
+      - zot_rendered:/etc/zot:ro
+      - ./zot/htpasswd:/etc/zot/htpasswd:ro
+    networks:
+      - platform
+    depends_on:
+      zot-config-render:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # -------------------------------------------------------------------
+  # Loki — monolithic mode. S3-backed chunks (DO Spaces), tsdb index
+  # local-then-shipped, 365-day retention via compactor. Only reachable
+  # via Caddy.
+  # -------------------------------------------------------------------
+  loki:
+    image: grafana/loki:3.5.5
+    restart: unless-stopped
+    env_file: .env
+    command:
+      - "-config.file=/etc/loki/local-config.yaml"
+      - "-config.expand-env=true"
+    expose:
+      - "3100"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_wal:/loki
+    networks:
+      - platform
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s

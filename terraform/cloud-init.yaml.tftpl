@@ -2,14 +2,14 @@
 # =====================================================================
 # Platform-tier droplet first-boot configuration.
 #
-# This bootstraps the host to the point where `docker compose up -d`
-# *could* run, but does NOT yet pull or start the platform stack
-# (Caddy + Zot + Loki). Standing up the compose stack — including the
-# Caddyfile, zot-config.json, loki-config.yaml, and any sealed
-# secrets — is a separate, follow-on commit per pillar 06's
-# "Effort breakdown" (Day 2 / Day 3).
+# This bootstraps the host AND clones the platform repo so the compose
+# stack (Caddy + Zot + Loki) is in place under /opt/platform/stack on
+# first SSH. It does NOT auto-`docker compose up` — the operator must
+# first supply the `.env` and generate `zot/htpasswd` (both are secrets
+# that live droplet-local and are not committed to git).
 #
 # Reference: docs/migration/06-platform-tier.md
+#            platform/README.md (operator first-time setup)
 # =====================================================================
 
 timezone: Europe/Madrid
@@ -25,27 +25,65 @@ packages:
   - unattended-upgrades
   - git
   - rclone
+  - apache2-utils    # provides htpasswd, used to generate zot/htpasswd
 
 write_files:
   # -----------------------------------------------------------------
-  # Stub /opt/platform/.env. The follow-on commit replaces / augments
-  # this with the full set of variables the docker-compose stack
-  # consumes (Spaces credentials for Zot, htpasswd path, etc.).
+  # Pre-seeded /opt/platform/.env. Has the Let's Encrypt email already
+  # filled in (from terraform.tfvars) but leaves the DO Spaces
+  # credentials as placeholders — those are operator inputs.
+  #
+  # When the compose stack is brought up, /opt/platform/stack/.env is
+  # a symlink to this file, so the operator only needs to edit ONE
+  # file regardless of which path they `cd` to.
   # -----------------------------------------------------------------
   - path: /opt/platform/.env
     permissions: "0600"
     owner: root:root
     content: |
-      # Platform-tier docker-compose environment — STUB.
-      # Populated by the follow-on commit that lands the compose stack.
+      # Platform-tier docker-compose environment.
+      # Pre-seeded by terraform cloud-init; fill in the placeholders
+      # before `docker compose up -d`. See platform/README.md.
+
+      # Caddy
       LETSENCRYPT_EMAIL=${letsencrypt_email}
 
-      # The follow-on stack will additionally need:
-      #   AWS_ACCESS_KEY_ID         (DO Spaces access id, for Zot S3 driver)
-      #   AWS_SECRET_ACCESS_KEY     (DO Spaces secret, for Zot S3 driver)
-      #   ZOT_HTPASSWD_CI           (bcrypt hash of the `ci` registry user)
-      #   LOKI_S3_ACCESS_KEY_ID     (DO Spaces access id, for Loki backend)
-      #   LOKI_S3_SECRET_ACCESS_KEY (DO Spaces secret, for Loki backend)
+      # Zot — DO Spaces (registry blobs)
+      SPACES_ENDPOINT=https://fra1.digitaloceanspaces.com
+      SPACES_REGION=fra1
+      SPACES_ACCESS_KEY=
+      SPACES_SECRET_KEY=
+
+      # Loki — DO Spaces (log chunks)
+      LOKI_S3_BUCKET=platform-logs
+      LOKI_S3_REGION=fra1
+      LOKI_S3_ACCESS_KEY=
+      LOKI_S3_SECRET_KEY=
+
+  # -----------------------------------------------------------------
+  # MOTD pointing operators at the first-time setup runbook.
+  # The compose stack does NOT auto-start — it needs droplet-local
+  # secrets (.env + zot/htpasswd) that the operator supplies on first
+  # SSH.
+  # -----------------------------------------------------------------
+  - path: /etc/motd
+    permissions: "0644"
+    owner: root:root
+    content: |
+      ============================================================
+      Fagor Healthcare — platform-tier droplet
+      ============================================================
+      Stack lives at:  /opt/platform/stack
+      First-time setup runbook:
+                       /opt/platform/stack/README.md
+                       (section "First-time setup on the droplet")
+      Quick start:
+        cd /opt/platform/stack
+        $EDITOR .env                       # pre-seeded; fill secrets
+        htpasswd -Bc zot/htpasswd ci
+        htpasswd -B  zot/htpasswd cluster
+        docker compose up -d
+      ============================================================
 
   # -----------------------------------------------------------------
   # Daily cron heartbeat — operator-visible signal that cron is alive.
@@ -93,6 +131,20 @@ runcmd:
 
   # -----------------------------------------------------------------
   # Sanity-check the platform working directory exists with sane perms.
-  # The follow-on commit drops the compose file + service configs here.
+  # /opt/platform/.env was pre-seeded above by write_files.
   # -----------------------------------------------------------------
   - install -d -m 0755 -o root -g root /opt/platform
+
+  # -----------------------------------------------------------------
+  # Clone the platform repo and link its stack/ subdir into a
+  # canonical /opt/platform/stack path. The operator's first SSH
+  # then has the compose file + configs already present; only the
+  # secret bits (.env values + zot/htpasswd) remain to be filled in.
+  #
+  # The .env lives at /opt/platform/.env (pre-seeded above) and is
+  # symlinked into the stack dir so docker-compose's `env_file: .env`
+  # finds it without the operator copying it around.
+  # -----------------------------------------------------------------
+  - git clone --depth 1 https://github.com/FagorHealthcare/platform.git /opt/platform-repo
+  - ln -sfn /opt/platform-repo/platform /opt/platform/stack
+  - ln -sfn /opt/platform/.env /opt/platform/stack/.env

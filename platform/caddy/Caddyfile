@@ -1,0 +1,59 @@
+# =====================================================================
+# Caddy — TLS edge for the platform droplet.
+#
+# Two virtual hosts under *.platform.fmd.fagorhealthcare.com, both with
+# automatic HTTPS via Let's Encrypt (HTTP-01 challenge over port 80).
+#
+# In a future migration we may switch to a DNS-01 challenge using the
+# DigitalOcean API (would let us hide ports 80/443 behind the cloud
+# firewall). For now HTTP-01 is fine: 80/443 are explicitly open in
+# the terraform-managed firewall and DNS already points at the
+# reserved IP.
+#
+# Reference: docs/migration/06-platform-tier.md
+# =====================================================================
+
+{
+    email {$LETSENCRYPT_EMAIL}
+    # Default global options:
+    #   - ACME directory: Let's Encrypt production
+    #   - HTTP-01 challenge on :80
+    #   - admin API on :2019 (internal, used by healthcheck)
+}
+
+# ---------------------------------------------------------------------
+# registry.platform.fmd.fagorhealthcare.com → Zot
+#
+# OCI clients (docker, oras, crane) require the original Host header
+# to pass through unchanged so Zot can issue correct redirects/links.
+# ---------------------------------------------------------------------
+registry.platform.fmd.fagorhealthcare.com {
+    reverse_proxy zot:5000 {
+        header_up Host {host}
+    }
+
+    encode gzip
+
+    log {
+        output stdout
+        format json
+    }
+}
+
+# ---------------------------------------------------------------------
+# logs.platform.fmd.fagorhealthcare.com → Loki
+#
+# Vector pushes log batches to /loki/api/v1/push as authenticated POSTs
+# (basic auth). LogQL clients (logcli, Grafana) hit /loki/api/v1/query*.
+# Caddy passes everything through unmodified.
+# ---------------------------------------------------------------------
+logs.platform.fmd.fagorhealthcare.com {
+    reverse_proxy loki:3100
+
+    encode gzip
+
+    log {
+        output stdout
+        format json
+    }
+}
