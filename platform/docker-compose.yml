@@ -193,7 +193,6 @@ services:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
       - "--web.external-url=https://alerts.platform.fmd.fagorhealthcare.com"
-      - "--log.level=debug"
     networks:
       - platform
     healthcheck:
