@@ -17,3 +17,15 @@ queries:
     file: pre/actualizacion-timeout-rate.yaml
     summary: 504s on /vN/actualizacion (NodeRed → Google Sheets timeouts)
     motivated_by: incident 2026-05-08
+
+  - id: md-core-request-failed-rate
+    cluster: pre
+    file: pre/md-core-request-failed-rate.yaml
+    summary: md-core "Request failed" rate (5xx-wrapping log line)
+    motivated_by: investigation 2026-05-08 (Hallazgo B — IntakeNotFoundException)
+
+  - id: md-core-error-rate
+    cluster: pre
+    file: pre/md-core-error-rate.yaml
+    summary: md-core total error/exception rate (broad health signal)
+    motivated_by: baseline characterization 2026-05-08

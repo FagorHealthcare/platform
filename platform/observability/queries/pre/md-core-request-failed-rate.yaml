@@ -1,0 +1,37 @@
+id: md-core-request-failed-rate
+title: md-core "Request failed" (req/s)
+description: |
+  Cuenta las líneas de log de md-core con el mensaje exacto
+  "Request failed". Es el envoltorio que md-core mete cada vez que un
+  endpoint HTTP devuelve un 5xx — el cliente más visible en los datos
+  de hoy es /shc/event con `IntakeNotFoundException` para pacientes
+  con desync entre SHC y backend.
+
+  Baseline observado el 2026-05-08: 9 líneas en 12 h
+  (~0.0002 req/s = ~0.0125/min). El umbral está calibrado para que
+  el alert dispare cuando aparecen 3 o más en 5 min — patrón típico
+  de un blister/treatment concreto que se está machacando.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="md-core"}
+           |= "Request failed" [5m]))
+
+unit: req/s
+
+alert:
+  name: MdCoreRequestFailedBurstPre
+  for: 2m
+  condition: "> 0.01"
+  severity: warning
+  summary: md-core "Request failed" sostenido > 3 errores/5min en pre
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: md-core
+  thresholds:
+    - { value: 0.01, color: yellow }
+    - { value: 0.05, color: red }
