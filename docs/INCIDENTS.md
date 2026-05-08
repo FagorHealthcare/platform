@@ -55,6 +55,21 @@ For NodeRed compromise specifically: scale to 0, detach the PVC for forensics (m
 
 ## Past incidents
 
+### 2026-05-08 — 504s en `/v4/v5/actualizacion` (Google Sheets 503 sobre NOTICIAS)
+
+**Resumen**: 105 timeouts en `POST /v{4,5}/actualizacion` (clientes Delphi/Indy de farmacias) durante 40 min (13:13–13:52 UTC). Causa: Google Sheets API devolvió `503 service is currently unavailable` sobre el documento `NOTICIAS` (`1FX6Q5RORHiKEIuQR4QToN0yeK-LRH8TMultXwQgGJeg`) durante 27 min. NOTICIAS está en serie en el flow de NodeRed para v4/v5 (no para v3, que sobrevivió). El contrib `node-red-contrib-google-sheets@1.1.2` no falla rápido; reintenta hasta que nginx corta a 60 s.
+
+**Detección**: queries.md #03/#04 sobre Loki revelaron el patrón de `request_time ≈ 60.0 s` exclusivo en /v4/v5. Smoking gun en `kubectl logs md-node-red-0` — 13 errores `[GSheet:NOTICIAS 1] The API returned an error: Error: The service is currently unavailable.` entre 15:22 y 15:49 Madrid.
+
+**Resolución**: ninguna acción nuestra. Google se recuperó sólo a las 13:49 UTC (o alguien tocó la hoja — no verificable sin abrir el version history del propio sheet).
+
+**Análisis completo**: [`docs/loki/queries.md` — sección "Investigación 2026-05-08 — Hallazgo A"](loki/queries.md).
+
+**Acciones pendientes derivadas**:
+- Cachear NOTICIAS en NodeRed con fail-open (mayor rentabilidad)
+- Añadir `node-red` a `kubernetes_filter_1` de Vector (sin esto, futuros eventos similares se pierden)
+- Investigar el patrón diario de 503 sobre `Hoja Eventos SHC` a las 04:03 UTC (aparece TODOS los días en los logs históricos del pod)
+
 ### 2026-03-23 — Cryptominer in NodeRed (dev cluster)
 
 **Summary**: A cryptominer (xmrig) was injected into NodeRed flows on the dev cluster. The attacker exploited an unauthenticated NodeRed editor exposed via Ingress. Container was compromised; no host or other cluster nodes were touched. Detected by repeated OOMKill events on node `5w3ni`.

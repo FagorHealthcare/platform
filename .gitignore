@@ -39,6 +39,7 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/terraform.tfvars
 terraform/*.tfplan
+terraform/platform-credentials.txt
 
 # =====================================================================
 # Platform stack secrets — droplet-local only, never committed.
