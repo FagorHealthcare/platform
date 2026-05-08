@@ -108,15 +108,17 @@ platform/observability/
 │   └── dev-0/
 │       └── ...
 ├── render.py                # generator — ~80 LOC
-├── ruler/                   # GENERATED — gitignored
-│   └── rules.yaml
-└── perses/                  # GENERATED — gitignored
+├── ruler/                   # GENERATED, COMMITTED — Loki Ruler reads here
+│   └── fake/rules.yaml      # `fake` = single-tenant directory
+└── perses/                  # GENERATED, COMMITTED — Perses provisions from here
     └── dashboard-*.yaml
 ```
 
-Generated outputs are gitignored — they are reproducible from `queries/`
-by running `python render.py`. CI on this branch (when wired up)
-will run render and diff to fail PRs that forget to regenerate.
+Generated outputs **are committed** to the repo. The platform droplet
+deploys via `git pull`; committing the outputs avoids needing Python
++ PyYAML on the droplet and makes the deployable artifact visible in
+PRs. CI runs `python render.py --check` to fail PRs that forget to
+regenerate (it diffs committed outputs against fresh rendering).
 
 ## Generator (`render.py`)
 

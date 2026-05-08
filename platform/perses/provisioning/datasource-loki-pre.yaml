@@ -1,0 +1,20 @@
+# Loki datasource for the `pre` cluster.
+#
+# Perses uses the Prometheus-API plugin to drive Loki: LogQL metric
+# queries (e.g. `rate(... [5m])`) speak the Prometheus query API at
+# /loki/api/v1/query and /loki/api/v1/query_range, which Perses
+# already knows how to consume.
+#
+# Authentication: Loki's edge (Caddy) requires basic-auth. Perses is
+# inside the same docker network, so it can reach Loki directly at
+# http://loki:3100 with no auth — this avoids leaking the LOKI_PASS
+# into a YAML on disk.
+kind: GlobalDatasource
+metadata:
+  name: loki-pre
+spec:
+  default: true
+  plugin:
+    kind: PrometheusDatasource
+    spec:
+      directUrl: http://loki:3100

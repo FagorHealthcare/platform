@@ -12,8 +12,8 @@ queries/                 # source of truth — humans edit here
   pre/<id>.yaml          # one file per (cluster, query)
   dev-0/<id>.yaml
 render.py                # generator
-ruler/                   # GENERATED, gitignored — Loki Ruler picks up rules.yaml from here
-perses/                  # GENERATED, gitignored — `percli dac apply` source
+ruler/fake/rules.yaml    # GENERATED, committed — Loki Ruler reads here (fake/ is the single-tenant subdir)
+perses/dashboard-*.yaml  # GENERATED, committed — Perses provisions from here
 ```
 
 ## Local setup

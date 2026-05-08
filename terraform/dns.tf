@@ -14,12 +14,16 @@
 # Records produced (all type A, all → reserved IP):
 #   registry.platform.fmd.fagorhealthcare.com
 #   logs.platform.fmd.fagorhealthcare.com
+#   alerts.platform.fmd.fagorhealthcare.com         (Alertmanager UI)
+#   dashboards.platform.fmd.fagorhealthcare.com     (Perses)
 # =====================================================================
 
 locals {
   dns_records = {
-    registry = "registry.${var.subdomain_label}"
-    logs     = "logs.${var.subdomain_label}"
+    registry   = "registry.${var.subdomain_label}"
+    logs       = "logs.${var.subdomain_label}"
+    alerts     = "alerts.${var.subdomain_label}"
+    dashboards = "dashboards.${var.subdomain_label}"
   }
 }
 

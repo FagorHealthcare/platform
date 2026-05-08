@@ -1,0 +1,8 @@
+# Perses project that all Fagor dashboards live under. The render.py
+# generator emits dashboards with `metadata.project: fagor`.
+kind: Project
+metadata:
+  name: fagor
+spec:
+  display:
+    name: Fagor Healthcare

@@ -111,3 +111,29 @@ limits_config:
 # ---------------------------------------------------------------------
 analytics:
   reporting_enabled: false
+
+# ---------------------------------------------------------------------
+# Ruler — evaluates the LogQL alerting rules generated from
+# platform/observability/queries/. Sends alerts to Alertmanager on the
+# internal `platform` network.
+#
+# Rules layout: /etc/loki/rules/<tenant>/*.yaml. With auth_enabled: false
+# the active tenant is `fake`, so the on-disk path is /etc/loki/rules/fake/.
+# The directory is mounted read-only from
+# ../observability/ruler in docker-compose.yml.
+#
+# Reload after editing rules without restarting Loki:
+#   docker compose kill -s HUP loki
+#
+# Reference: docs/observability-DESIGN.md
+# ---------------------------------------------------------------------
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /etc/loki/rules
+  rule_path: /loki/ruler-cache
+  alertmanager_url: http://alertmanager:9093
+  evaluation_interval: 30s
+  poll_interval: 1m
+  enable_api: true

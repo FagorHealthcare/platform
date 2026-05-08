@@ -1,0 +1,45 @@
+# =====================================================================
+# Alertmanager — routing & deduplication for Loki Ruler alerts.
+#
+# This is the BOOTSTRAP config: the default route uses a `null` receiver,
+# so alerts are visible in the Alertmanager UI but no Slack/email
+# notifications fire. To wire Slack later:
+#
+#   1. Set SLACK_WEBHOOK_URL=... in /opt/platform/.env on the droplet
+#   2. Replace the `null` receiver below with the `slack` block in the
+#      commented-out section
+#   3. docker compose up -d alertmanager
+#
+# UI is published at https://alerts.platform.fmd.fagorhealthcare.com
+# behind Caddy basic-auth (same credential pair as Loki).
+#
+# Reference: docs/observability-DESIGN.md
+# =====================================================================
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'cluster']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'null'
+
+receivers:
+  - name: 'null'
+
+# When ready to enable Slack:
+#
+#   - name: 'slack'
+#     slack_configs:
+#       - api_url: '${SLACK_WEBHOOK_URL}'
+#         channel: '#circupack'
+#         send_resolved: true
+#         title: '{{ .CommonLabels.alertname }} — {{ .CommonLabels.cluster }}'
+#         text: |
+#           {{ range .Alerts }}
+#           *{{ .Annotations.summary }}*
+#           {{ .Annotations.description }}
+#           runbook: {{ .Annotations.runbook }}
+#           {{ end }}

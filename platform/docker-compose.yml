@@ -3,10 +3,12 @@
 #
 # Runs on the dedicated Debian droplet provisioned by ../terraform/.
 # Services:
-#   - caddy : TLS edge (Let's Encrypt) for *.platform.fmd.fagorhealthcare.com
-#   - zot   : OCI registry (LOCAL disk on droplet, Trivy CVE scanning;
-#             nightly rclone mirror to DO Spaces handled by md-backup)
-#   - loki  : log aggregator (S3 backend → DO Spaces, 365-day retention)
+#   - caddy        : TLS edge (Let's Encrypt) for *.platform.fmd.fagorhealthcare.com
+#   - zot          : OCI registry (LOCAL disk on droplet, Trivy CVE scanning;
+#                    nightly rclone mirror to DO Spaces handled by md-backup)
+#   - loki         : log aggregator (S3 backend → DO Spaces, 365-day retention)
+#   - alertmanager : routes/dedup alerts emitted by Loki Ruler
+#   - perses       : LogQL dashboards (file-provisioned, no DB)
 #
 # Caddy is the ONLY service that publishes ports on the host. Zot and
 # Loki are reachable only via the internal `platform` bridge network.
@@ -29,6 +31,11 @@ volumes:
                      # requires real POSIX storage; S3 backend is rejected
                      # by Zot's validator). Mirrored nightly to Spaces by
                      # md-backup. See docs/migration/02-registry.md.
+  alertmanager_data: # Silences + notification log. Ephemeral by nature
+                     # (lost silences can be recreated); not Spaces-backed.
+  perses_data:       # File-based Perses runtime cache. Source of truth is
+                     # platform/observability/queries/, rendered into the
+                     # provisioning mounts below.
 
 services:
   # -------------------------------------------------------------------
@@ -55,6 +62,10 @@ services:
         # is tested end-to-end via Caddy / curl from outside.
         condition: service_started
       loki:
+        condition: service_healthy
+      alertmanager:
+        condition: service_healthy
+      perses:
         condition: service_healthy
     healthcheck:
       # Caddy's admin API listens on :2019 inside the container by default.
@@ -144,6 +155,11 @@ services:
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
       - loki_wal:/loki
+      # Loki Ruler reads alerting rules from this directory (per tenant
+      # subdirectory; with auth_enabled: false the active tenant is `fake`).
+      # Source: platform/observability/queries/, rendered by render.py.
+      # `kill -s HUP loki` reloads rules without a full restart.
+      - ./observability/ruler:/etc/loki/rules:ro
     networks:
       - platform
     healthcheck:
@@ -152,3 +168,58 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+
+  # -------------------------------------------------------------------
+  # Alertmanager — dedupes/routes alerts emitted by Loki Ruler. The
+  # bootstrap config sends alerts to a `null` receiver (visible only in
+  # the UI). To wire Slack: see platform/alertmanager/alertmanager.yml
+  # for the commented-out template.
+  # -------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    expose:
+      - "9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.external-url=https://alerts.platform.fmd.fagorhealthcare.com"
+    networks:
+      - platform
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # -------------------------------------------------------------------
+  # Perses — LogQL dashboards. File-provisioned (no DB):
+  #   - manual:    platform/perses/provisioning/      (project + datasources)
+  #   - generated: platform/observability/perses/     (dashboards)
+  # Both folders are listed in platform/perses/config.yaml under
+  # provisioning.folders, polled every 1m.
+  # -------------------------------------------------------------------
+  perses:
+    image: persesdev/perses:v0.50.2
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - ./perses/config.yaml:/etc/perses/config.yaml:ro
+      - ./perses/provisioning:/etc/perses/provisioning:ro
+      - ./observability/perses:/etc/perses/dashboards:ro
+      - perses_data:/var/lib/perses
+    command:
+      - "--config=/etc/perses/config.yaml"
+    networks:
+      - platform
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

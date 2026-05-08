@@ -67,3 +67,43 @@ logs.platform.fmd.fagorhealthcare.com {
         format json
     }
 }
+
+# ---------------------------------------------------------------------
+# alerts.platform.fmd.fagorhealthcare.com → Alertmanager UI
+# Same basic-auth credential pair as Loki — the Alertmanager UI is
+# operator-facing only.
+# ---------------------------------------------------------------------
+alerts.platform.fmd.fagorhealthcare.com {
+    basic_auth {
+        {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
+    }
+
+    reverse_proxy alertmanager:9093
+
+    encode gzip
+
+    log {
+        output stdout
+        format json
+    }
+}
+
+# ---------------------------------------------------------------------
+# dashboards.platform.fmd.fagorhealthcare.com → Perses UI
+# Same basic-auth credential pair. Perses itself runs with auth
+# disabled (single-user view); the gate is at the edge.
+# ---------------------------------------------------------------------
+dashboards.platform.fmd.fagorhealthcare.com {
+    basic_auth {
+        {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
+    }
+
+    reverse_proxy perses:8080
+
+    encode gzip
+
+    log {
+        output stdout
+        format json
+    }
+}

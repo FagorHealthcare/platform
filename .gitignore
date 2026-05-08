@@ -50,12 +50,10 @@ platform/.env
 platform/zot/htpasswd
 
 # =====================================================================
-# Observability layer — render.py outputs and Python venv.
-# The source of truth lives in platform/observability/queries/. The
-# rendered ruler/Perses YAML are reproducible from there; CI runs
-# `python render.py --check` to enforce drift detection.
+# Observability layer — Python venv only. The rendered ruler/Perses
+# YAML ARE checked in, so the droplet just needs `git pull`. CI runs
+# `python render.py --check` to enforce that the committed outputs
+# match the sources under queries/.
 # =====================================================================
 platform/observability/.venv/
-platform/observability/ruler/
-platform/observability/perses/
 platform/observability/__pycache__/
