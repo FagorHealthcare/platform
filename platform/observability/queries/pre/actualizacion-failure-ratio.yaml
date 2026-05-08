@@ -1,0 +1,31 @@
+id: actualizacion-failure-ratio
+title: Ratio de fallos /vN/actualizacion (504 ÷ total)
+description: |
+  Porcentaje de calls a /vN/actualizacion que terminan en 504.
+  Más informativo que la tasa absoluta para entender el impacto
+  real: "1% de farmacias fallando" pesa distinto que "20% de
+  farmacias fallando", aunque ambos puedan disparar el alert
+  absoluto si el tráfico es alto.
+
+  Sin alerta — el alert absoluto (`ActualizacionTimeoutSpikePre`)
+  ya cubre la urgencia.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="controller"}
+           |~ "actualizacion" | json | status="504" [5m]))
+  /
+  sum(rate({cluster="pre", container="controller"}
+           |~ "actualizacion" [5m]))
+
+unit: ratio
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: ratio 504/total
+  thresholds:
+    - { value: 0.01, color: yellow }
+    - { value: 0.10, color: red }

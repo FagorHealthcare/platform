@@ -94,6 +94,103 @@ spec:
                   sum(rate({cluster="pre", container="md-core"}
                            |~ "(?i)error|exception" [5m]))
                 seriesNameFormat: md-core
+    log_volume_by_container:
+      kind: Panel
+      spec:
+        display:
+          name: Volumen de log por contenedor (líneas/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec: {}
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum by (container) (
+                    rate({cluster="pre"} [5m])
+                  )
+                seriesNameFormat: '{{container}}'
+    ingress_status_rate:
+      kind: Panel
+      spec:
+        display:
+          name: Status del ingress por código (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec: {}
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum by (status) (
+                    rate({cluster="pre", container="controller"}
+                         | json
+                         | __error__="" [5m])
+                  )
+                seriesNameFormat: '{{status}}'
+    actualizacion_failure_ratio:
+      kind: Panel
+      spec:
+        display:
+          name: Ratio de fallos /vN/actualizacion (504 ÷ total)
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            thresholds:
+              steps:
+              - value: 0.01
+                color: yellow
+              - value: 0.1
+                color: red
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="controller"}
+                           |~ "actualizacion" | json | status="504" [5m]))
+                  /
+                  sum(rate({cluster="pre", container="controller"}
+                           |~ "actualizacion" [5m]))
+                seriesNameFormat: ratio 504/total
+    md_core_no_programming_rate:
+      kind: Panel
+      spec:
+        display:
+          name: md-core "No programming found for device" (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec: {}
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="md-core"}
+                           |= "No programming found for device" [5m]))
+                seriesNameFormat: md-core
   layouts:
   - kind: Grid
     spec:
@@ -102,19 +199,43 @@ spec:
       items:
       - x: 0
         y: 0
-        width: 24
+        width: 12
         height: 8
         content:
           $ref: '#/spec/panels/actualizacion_timeout_rate'
-      - x: 0
-        y: 8
-        width: 24
+      - x: 12
+        y: 0
+        width: 12
         height: 8
         content:
           $ref: '#/spec/panels/md_core_request_failed_rate'
       - x: 0
-        y: 16
-        width: 24
+        y: 8
+        width: 12
         height: 8
         content:
           $ref: '#/spec/panels/md_core_error_rate'
+      - x: 12
+        y: 8
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/log_volume_by_container'
+      - x: 0
+        y: 16
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/ingress_status_rate'
+      - x: 12
+        y: 16
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/actualizacion_failure_ratio'
+      - x: 0
+        y: 24
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/md_core_no_programming_rate'

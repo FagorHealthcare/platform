@@ -1,0 +1,25 @@
+id: log-volume-by-container
+title: Volumen de log por contenedor (líneas/s)
+description: |
+  Tasa de líneas de log por contenedor. Sirve como salud general del
+  sistema: un servicio que de pronto deja de logar (una línea plana
+  cae a cero) o uno que dispara la verbosidad (un pico bajo carga)
+  son señales tempranas que se ven aquí antes de que aparezca un
+  error explícito.
+
+  Sin alerta — sólo panel exploratorio.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum by (container) (
+    rate({cluster="pre"} [5m])
+  )
+
+unit: req/s
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: "{{container}}"

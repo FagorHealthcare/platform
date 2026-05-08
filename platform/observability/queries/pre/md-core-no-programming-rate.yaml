@@ -1,0 +1,28 @@
+id: md-core-no-programming-rate
+title: md-core "No programming found for device" (req/s)
+description: |
+  Tasa de líneas con el patrón "No programming found for device". Es
+  un error conocido pero sin investigar a fondo todavía: lo vimos
+  el 2026-05-08 alrededor de la incidencia /actualizacion (10 lineas
+  en una ventana de 1 h). Probablemente significa que un SHC físico
+  reporta un device-id que md-core no tiene cargado en memoria —
+  posible carga incompleta tras un restart, o un dispositivo que
+  no está dado de alta.
+
+  Sin alerta agresivo todavía — sólo panel para caracterizar el
+  patrón antes de decidir un umbral. Cuando entendamos el baseline
+  añadimos alert.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="md-core"}
+           |= "No programming found for device" [5m]))
+
+unit: req/s
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: md-core

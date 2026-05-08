@@ -68,8 +68,10 @@ services:
       perses:
         condition: service_started
     healthcheck:
-      # Caddy's admin API listens on :2019 inside the container by default.
-      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:2019/config/"]
+      # Caddy's admin API listens on 127.0.0.1:2019 (IPv4-only) inside the
+      # container. busybox `wget` resolves `localhost` to ::1 first and gets
+      # `connection refused`, so we hit the v4 address explicitly.
+      test: ["CMD", "wget", "-q", "-O-", "-T", "5", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 5

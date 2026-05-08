@@ -1,0 +1,27 @@
+id: ingress-status-rate
+title: Status del ingress por código (req/s)
+description: |
+  Tasa de respuestas del ingress nginx agrupadas por código de
+  estado HTTP. Permite ver el ratio 200/204/308/4xx/5xx de un
+  vistazo y detectar shifts (más 5xx, más 4xx, caída de 200) sin
+  esperar a que dispare un alert.
+
+  Sin alerta dedicada — los códigos críticos (504 sobre
+  /actualizacion, 5xx genérico) tienen sus propios alerts.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum by (status) (
+    rate({cluster="pre", container="controller"}
+         | json
+         | __error__="" [5m])
+  )
+
+unit: req/s
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: "{{status}}"

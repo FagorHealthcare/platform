@@ -133,15 +133,19 @@ def render_perses(queries: list[dict], outdir: Path) -> None:
     perses_dir.mkdir(parents=True, exist_ok=True)
 
     for dashboard_id, qs in sorted(by_dashboard.items()):
+        # 2-column layout: 12 wide × 8 high. With ≥4 panels this fits
+        # comfortably in a normal screen without forcing scroll.
         panels = {}
         layout_items = []
         for i, q in enumerate(qs):
             panel_id = q["id"].replace("-", "_")
             panels[panel_id] = panel_for(q)
+            col = i % 2
+            row = i // 2
             layout_items.append({
-                "x": 0,
-                "y": i * 8,
-                "width": 24,
+                "x": col * 12,
+                "y": row * 8,
+                "width": 12,
                 "height": 8,
                 "content": {"$ref": f"#/spec/panels/{panel_id}"},
             })

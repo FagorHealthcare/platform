@@ -29,3 +29,23 @@ queries:
     file: pre/md-core-error-rate.yaml
     summary: md-core total error/exception rate (broad health signal)
     motivated_by: baseline characterization 2026-05-08
+
+  - id: log-volume-by-container
+    cluster: pre
+    file: pre/log-volume-by-container.yaml
+    summary: log lines/s per container (panel-only — overall liveness)
+
+  - id: ingress-status-rate
+    cluster: pre
+    file: pre/ingress-status-rate.yaml
+    summary: ingress responses per HTTP status (panel-only)
+
+  - id: actualizacion-failure-ratio
+    cluster: pre
+    file: pre/actualizacion-failure-ratio.yaml
+    summary: ratio of /actualizacion 504s to total /actualizacion calls
+
+  - id: md-core-no-programming-rate
+    cluster: pre
+    file: pre/md-core-no-programming-rate.yaml
+    summary: md-core "No programming found for device" rate (under-characterized pattern)
