@@ -1,14 +1,12 @@
 # =====================================================================
 # Alertmanager — routing & deduplication for Loki Ruler alerts.
 #
-# This is the BOOTSTRAP config: the default route uses a `null` receiver,
-# so alerts are visible in the Alertmanager UI but no Slack/email
-# notifications fire. To wire Slack later:
-#
-#   1. Set SLACK_WEBHOOK_URL=... in /opt/platform/.env on the droplet
-#   2. Replace the `null` receiver below with the `slack` block in the
-#      commented-out section
-#   3. docker compose up -d alertmanager
+# Notifies #circupack via Slack incoming webhook. The webhook URL is
+# read from /etc/alertmanager/slack-webhook.txt (gitignored, mounted
+# into the container from platform/alertmanager/slack-webhook.txt on
+# the droplet). Alertmanager re-reads the file on each notification —
+# rotating the webhook is just `echo NEW > slack-webhook.txt`, no
+# restart needed.
 #
 # UI is published at https://alerts.platform.fmd.fagorhealthcare.com
 # behind Caddy basic-auth (same credential pair as Loki).
@@ -18,28 +16,27 @@
 
 global:
   resolve_timeout: 5m
+  # File-based webhook URL keeps the secret out of git. Slack's incoming
+  # webhook contains the channel routing — `channel:` here is decorative
+  # in webhook mode but kept for readability.
+  slack_api_url_file: /etc/alertmanager/slack-webhook.txt
 
 route:
   group_by: ['alertname', 'cluster']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: 'null'
+  receiver: 'slack'
 
 receivers:
-  - name: 'null'
-
-# When ready to enable Slack:
-#
-#   - name: 'slack'
-#     slack_configs:
-#       - api_url: '${SLACK_WEBHOOK_URL}'
-#         channel: '#circupack'
-#         send_resolved: true
-#         title: '{{ .CommonLabels.alertname }} — {{ .CommonLabels.cluster }}'
-#         text: |
-#           {{ range .Alerts }}
-#           *{{ .Annotations.summary }}*
-#           {{ .Annotations.description }}
-#           runbook: {{ .Annotations.runbook }}
-#           {{ end }}
+  - name: 'slack'
+    slack_configs:
+      - channel: '#circupack'
+        send_resolved: true
+        title: '{{ .Status | toUpper }} · {{ .CommonLabels.alertname }} · {{ .CommonLabels.cluster }}'
+        text: |-
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ if .Annotations.runbook }}runbook: {{ .Annotations.runbook }}{{ end }}
+          {{ end }}

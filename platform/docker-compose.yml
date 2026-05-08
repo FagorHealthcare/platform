@@ -184,6 +184,10 @@ services:
       - "9093"
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # Slack webhook URL — gitignored, droplet-local file. Rotating the
+      # webhook is `echo NEW > slack-webhook.txt`; Alertmanager re-reads
+      # the file per notification, no restart needed.
+      - ./alertmanager/slack-webhook.txt:/etc/alertmanager/slack-webhook.txt:ro
       - alertmanager_data:/alertmanager
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"

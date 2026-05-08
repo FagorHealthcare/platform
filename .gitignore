@@ -48,6 +48,7 @@ terraform/platform-credentials.txt
 # =====================================================================
 platform/.env
 platform/zot/htpasswd
+platform/alertmanager/slack-webhook.txt
 
 # =====================================================================
 # Observability layer — Python venv only. The rendered ruler/Perses
