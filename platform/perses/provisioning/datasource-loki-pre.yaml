@@ -5,17 +5,20 @@
 # /loki/api/v1/query and /loki/api/v1/query_range, which Perses
 # already knows how to consume.
 #
-# IMPORTANT: directUrl includes the `/loki` prefix. Perses always
-# appends `/api/v1/query[_range]` to the directUrl, so we point at
-# `http://loki:3100/loki` and the resulting URL becomes
-# `http://loki:3100/loki/api/v1/query_range` — exactly Loki's LogQL
-# endpoint. Without the prefix Perses hits `/api/v1/query_range`,
-# which Loki returns 404 for, and the frontend shows "failed to
-# fetch" on every panel.
+# Mode is `proxy` (NOT `directUrl`):
+#   - directUrl makes the browser hit the URL directly. Loki is on
+#     the internal docker network — the browser cannot resolve it.
+#   - proxy makes the Perses backend hit the URL on behalf of the
+#     browser. The frontend calls /proxy/<datasource>/api/v1/...
+#     and Perses forwards to the configured URL.
 #
-# Authentication: Loki's edge (Caddy) requires basic-auth. Perses is
-# inside the same docker network, so it can reach Loki directly with
-# no auth — this avoids leaking the LOKI_PASS into a YAML on disk.
+# The url ends in `/loki` because Perses then appends
+# `/api/v1/query[_range]`, and Loki's Prometheus-compatible LogQL
+# endpoints live under /loki/api/v1/... not under the root.
+#
+# No auth: Perses is on the same internal docker network as Loki, so
+# it talks directly to it; the basic-auth gate at Caddy is only for
+# external callers (Vector pushes, logcli queries from operators).
 kind: GlobalDatasource
 metadata:
   name: loki-pre
@@ -24,4 +27,7 @@ spec:
   plugin:
     kind: PrometheusDatasource
     spec:
-      directUrl: http://loki:3100/loki
+      proxy:
+        kind: HTTPProxy
+        spec:
+          url: http://loki:3100/loki
