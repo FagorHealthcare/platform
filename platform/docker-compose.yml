@@ -105,7 +105,7 @@ services:
   # durability. See pillar 02 (docs/migration/02-registry.md).
   # -------------------------------------------------------------------
   zot:
-    image: ghcr.io/project-zot/zot-linux-amd64:v2.1.5
+    image: ghcr.io/project-zot/zot-linux-amd64:v2.1.16
     restart: unless-stopped
     expose:
       - "5000"
