@@ -46,6 +46,15 @@ resource "digitalocean_droplet" "platform" {
     spaces_bucket_registry = var.spaces_bucket_registry
     spaces_bucket_logs     = var.spaces_bucket_logs
   })
+
+  # cloud-init's user_data is "forces replacement" by provider design.
+  # Once the droplet is provisioned and bootstrapped, we never want a
+  # stray cloud-init template edit to nuke /var/lib/registry, /loki,
+  # or the Caddy ACME state. To re-bootstrap intentionally:
+  #   terraform apply -replace=digitalocean_droplet.platform
+  lifecycle {
+    ignore_changes = [user_data]
+  }
 }
 
 # ---------------------------------------------------------------------
