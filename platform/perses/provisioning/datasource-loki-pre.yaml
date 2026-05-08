@@ -5,10 +5,17 @@
 # /loki/api/v1/query and /loki/api/v1/query_range, which Perses
 # already knows how to consume.
 #
+# IMPORTANT: directUrl includes the `/loki` prefix. Perses always
+# appends `/api/v1/query[_range]` to the directUrl, so we point at
+# `http://loki:3100/loki` and the resulting URL becomes
+# `http://loki:3100/loki/api/v1/query_range` — exactly Loki's LogQL
+# endpoint. Without the prefix Perses hits `/api/v1/query_range`,
+# which Loki returns 404 for, and the frontend shows "failed to
+# fetch" on every panel.
+#
 # Authentication: Loki's edge (Caddy) requires basic-auth. Perses is
-# inside the same docker network, so it can reach Loki directly at
-# http://loki:3100 with no auth — this avoids leaking the LOKI_PASS
-# into a YAML on disk.
+# inside the same docker network, so it can reach Loki directly with
+# no auth — this avoids leaking the LOKI_PASS into a YAML on disk.
 kind: GlobalDatasource
 metadata:
   name: loki-pre
@@ -17,4 +24,4 @@ spec:
   plugin:
     kind: PrometheusDatasource
     spec:
-      directUrl: http://loki:3100
+      directUrl: http://loki:3100/loki
