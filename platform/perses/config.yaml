@@ -10,12 +10,6 @@
 # Reference: docs/observability-DESIGN.md
 # =====================================================================
 
-api:
-  enable: true
-
-frontend:
-  enable: true
-
 provisioning:
   folders:
     - /etc/perses/provisioning   # manual: project + datasources
