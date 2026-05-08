@@ -134,6 +134,9 @@ ruler:
       directory: /etc/loki/rules
   rule_path: /loki/ruler-cache
   alertmanager_url: http://alertmanager:9093
+  # Alertmanager 0.27 only speaks v2; without this flag Loki Ruler hits
+  # the deprecated v1 endpoint and the alerts silently never arrive.
+  enable_alertmanager_v2: true
   evaluation_interval: 30s
   poll_interval: 1m
   enable_api: true
