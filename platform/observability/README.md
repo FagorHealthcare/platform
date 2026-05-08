@@ -84,6 +84,40 @@ panel:
 See `queries/pre/actualizacion-timeout-rate.yaml` for a complete worked
 example covering both an alert and a panel.
 
+## Slack webhook (deployed state)
+
+Alertmanager reads the webhook URL from
+`/etc/alertmanager/slack-webhook.txt` (mounted from
+`platform/alertmanager/slack-webhook.txt` on the droplet, gitignored).
+
+When provisioning a fresh droplet, drop the URL into that file and
+make sure it's readable by the `nobody` user:
+
+```bash
+echo 'https://hooks.slack.com/services/...' \
+  > /opt/platform/stack/alertmanager/slack-webhook.txt
+chmod 0644 /opt/platform/stack/alertmanager/slack-webhook.txt
+```
+
+`0640` is **not enough** — the `prom/alertmanager` image runs as
+`nobody`, not as root. With wrong perms Alertmanager logs
+`open /etc/alertmanager/slack-webhook.txt: permission denied` and
+moves on without delivering. Worse, it then waits the full
+`repeat_interval` (4h by default) before re-attempting. Recover from
+that state by either waiting, or wiping the AM nflog volume:
+
+```bash
+cd /opt/platform/stack
+docker compose rm -fsv alertmanager
+docker volume rm stack_alertmanager_data
+docker compose up -d alertmanager
+```
+
+The `channel:` field in `alertmanager.yml` is **decorative** for
+incoming webhooks — Slack ignores it; the URL itself encodes the
+destination channel. To change channels, regenerate the webhook in
+Slack admin and overwrite `slack-webhook.txt`.
+
 ## Cookbook vs catalog
 
 The cookbook in [`docs/loki/queries.md`](../../docs/loki/queries.md) is
