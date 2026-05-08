@@ -206,6 +206,11 @@ services:
   perses:
     image: persesdev/perses:v0.50.2
     restart: unless-stopped
+    # Perses runs as `nobody`. Compose-managed volumes are owned by root
+    # by default and Perses can't `mkdir` its sub-folders inside them.
+    # `user:` runs the container as root so the initial mkdir succeeds;
+    # the binary then writes as root, which is fine inside the container.
+    user: "0:0"
     expose:
       - "8080"
     volumes:
