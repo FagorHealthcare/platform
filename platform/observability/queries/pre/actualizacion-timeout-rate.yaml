@@ -1,0 +1,38 @@
+id: actualizacion-timeout-rate
+title: 504s en /vN/actualizacion (req/s)
+description: |
+  Tasa de timeouts del ingress sobre los endpoints /actualizacion.
+  Los servidores son NodeRed flows que persisten en Google Sheets;
+  un 503 transitorio de Sheets API sobre la hoja NOTICIAS deja
+  colgado el flow hasta que nginx corta a los 60 s. Ver el
+  análisis completo en docs/INCIDENTS.md (entrada 2026-05-08) y
+  los detalles arquitecturales en docs/loki/queries.md
+  (sección "Investigación 2026-05-08 — Hallazgo A").
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum by (cluster) (
+    rate({cluster="pre", container="controller"}
+         |~ "actualizacion"
+         | json
+         | status="504" [5m])
+  )
+
+unit: req/s
+
+alert:
+  name: ActualizacionTimeoutSpikePre
+  for: 5m
+  condition: "> 0.02"
+  severity: warning
+  summary: Timeouts on /vN/actualizacion in pre exceed 0.02 req/s for 5m
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: "{{cluster}}"
+  thresholds:
+    - { value: 0.02, color: yellow }
+    - { value: 0.10, color: red }

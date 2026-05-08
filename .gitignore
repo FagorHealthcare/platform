@@ -48,3 +48,14 @@ terraform/platform-credentials.txt
 # =====================================================================
 platform/.env
 platform/zot/htpasswd
+
+# =====================================================================
+# Observability layer — render.py outputs and Python venv.
+# The source of truth lives in platform/observability/queries/. The
+# rendered ruler/Perses YAML are reproducible from there; CI runs
+# `python render.py --check` to enforce drift detection.
+# =====================================================================
+platform/observability/.venv/
+platform/observability/ruler/
+platform/observability/perses/
+platform/observability/__pycache__/

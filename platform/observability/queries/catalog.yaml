@@ -1,0 +1,19 @@
+# Stable index of every query in the catalog.
+#
+# A query "graduates" from docs/loki/queries.md to a YAML file here when its
+# LogQL kernel is stable enough to drive a panel and/or an alert. The cookbook
+# entry then links to its catalog entry by id.
+#
+# Each id is permanent — renaming an id breaks alert history and dashboard
+# permalinks. Add new ids; never repurpose old ones.
+#
+# Adding a query: drop a YAML under queries/<cluster>/<id>.yaml, register it
+# here with a one-line summary, then run platform/observability/render.py.
+
+queries:
+
+  - id: actualizacion-timeout-rate
+    cluster: pre
+    file: pre/actualizacion-timeout-rate.yaml
+    summary: 504s on /vN/actualizacion (NodeRed → Google Sheets timeouts)
+    motivated_by: incident 2026-05-08

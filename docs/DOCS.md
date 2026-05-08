@@ -13,6 +13,7 @@ If you are new to the system, read in this order:
 5. **[OPERATIONS.md](OPERATIONS.md)** — daily ops, certificates, secrets, troubleshooting
 6. **[INCIDENTS.md](INCIDENTS.md)** — incident playbook and history
 7. **[fhctl-DESIGN.md](fhctl-DESIGN.md)** — proposed CLI to make all of the above scriptable
+8. **[observability-DESIGN.md](observability-DESIGN.md)** — design of the alerting/dashboarding layer on top of Loki (Loki Ruler + Alertmanager + Perses)
 
 ## Cross-references
 
