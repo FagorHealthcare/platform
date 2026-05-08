@@ -31,7 +31,7 @@ route:
 receivers:
   - name: 'slack'
     slack_configs:
-      - channel: '#circupack'
+      - channel: '#alertas'
         send_resolved: true
         title: '{{ .Status | toUpper }} · {{ .CommonLabels.alertname }} · {{ .CommonLabels.cluster }}'
         text: |-
