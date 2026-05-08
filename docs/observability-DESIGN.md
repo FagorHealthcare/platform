@@ -141,22 +141,37 @@ The generator is intentionally minimal. It does NOT:
 - Emit the `Datasource` object (Perses datasources are bootstrapped
   separately, once per project).
 
-## Deployment plan (NOT in this branch)
+## Status — what's deployed, what's open
 
-A follow-up branch will:
+**Deployed on the platform droplet (2026-05-08)**:
 
-1. Add Alertmanager + Perses containers to `platform/docker-compose.yml`,
-   wired through Caddy with basic-auth.
-2. Add Ruler config to `platform/loki/loki.yaml`, mount `ruler/`.
-3. Add a `make rules` / `make dashboards` target (or Makefile-equivalent
-   shell script) that runs `render.py` and copies outputs into the
-   running stack via SCP + `docker compose kill -s HUP loki` and
-   `percli dac apply`.
-4. Add a smoke-test alert (`AlwaysFiring`) to verify Slack delivery.
+- Loki Ruler with rules under `/etc/loki/rules/fake/` (mounted from
+  `platform/observability/ruler/`). Reload via
+  `docker compose kill -s HUP loki`.
+- Alertmanager v0.27 at `https://alerts.platform.fmd.fagorhealthcare.com`
+  behind Caddy basic-auth.
+- Perses v0.50.2 at `https://dashboards.platform.fmd.fagorhealthcare.com`
+  behind Caddy basic-auth, file-provisioned project + datasource +
+  dashboards.
+- Day-to-day rule/dashboard updates: edit under `queries/`, run
+  `python render.py`, commit, `git pull` on the droplet,
+  `docker compose kill -s HUP loki`. Perses re-polls
+  provisioning every 1 min — no manual action.
 
-This branch only ships the schema, the generator, and the first
-graduated query — `actualizacion-timeout-rate` — derived from the
-2026-05-08 incident.
+**Open items**:
+
+- **Slack notifications**: Alertmanager still on `null` receiver. To
+  enable: drop `SLACK_WEBHOOK_URL=…` into `/opt/platform/.env`,
+  uncomment the `slack` block in
+  `platform/alertmanager/alertmanager.yml`, change the `route:
+  receiver:` from `null` to `slack`, then
+  `docker compose up -d alertmanager`.
+- **Multi-cluster**: only `pre` cluster has rules/panels today. Adding
+  `dev-0` is mechanical: copy each YAML to `queries/dev-0/`, change
+  the cluster label and alert name.
+- **Render-on-CI guard**: GitHub Actions on PRs should run
+  `python render.py --check` to fail PRs that forget to regenerate
+  outputs. Not wired yet.
 
 ## Open questions
 
