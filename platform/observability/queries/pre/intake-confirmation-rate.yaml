@@ -1,0 +1,25 @@
+id: intake-confirmation-rate
+title: Tomas confirmadas (count/h)
+description: |
+  Número de tomas confirmadas a través de los SHC físicos (mensajes
+  TOMA CONFIRMADA emitidos por md-core cuando el dispositivo del
+  paciente reporta que la dosis se ha tomado). Métrica primaria de
+  adherencia del paciente.
+
+  Sin alerta — primera iteración. Necesitamos observar 1-2 semanas
+  para establecer baseline antes de calibrar umbrales (un drop a
+  cero podría ser legítimo en fin de semana, festivo, etc.).
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(count_over_time({cluster="pre", container="md-core"}
+                      |~ "TOMA CONFIRMADA" [1h]))
+
+unit: count/h
+
+panel:
+  dashboard: pre-business
+  type: timeseries
+  legend: confirmed

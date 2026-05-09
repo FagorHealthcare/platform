@@ -22,10 +22,12 @@ expr: |
 
 unit: ratio
 
+threshold:
+  warning: 0.01    # panel yellow
+  critical: 0.10   # panel red
+  # No alert block — covered by ActualizacionTimeoutSpikePre on the absolute rate.
+
 panel:
   dashboard: pre-overview
   type: timeseries
   legend: ratio 504/total
-  thresholds:
-    - { value: 0.01, color: yellow }
-    - { value: 0.10, color: red }

@@ -1,0 +1,30 @@
+id: daily-reports-requested
+title: Informes diarios solicitados (count/h)
+description: |
+  Tasa de solicitudes de generación de informe diario por parte de
+  md-core (mensaje "Solicitado informe para %s (tratamiento: %s)
+  del blister %s" emitido por NotificationSchedulerService cada
+  vez que se programa la generación del daily report de un
+  paciente).
+
+  Métrica de actividad: indica cuántos pacientes activos están
+  generando informes en tiempo real. Caída brusca a 0 durante
+  horas activas indicaría que el scheduler de informes está roto.
+
+  Baseline 24h (9-may-2026): 162/24h (~6.75/h).
+
+  Sin alerta — primera iteración.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(count_over_time({cluster="pre", container="md-core"}
+                      |~ "Solicitado informe" [1h]))
+
+unit: count/h
+
+panel:
+  dashboard: pre-business
+  type: timeseries
+  legend: requested

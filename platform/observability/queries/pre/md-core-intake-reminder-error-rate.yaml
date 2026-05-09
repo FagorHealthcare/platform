@@ -18,10 +18,13 @@ expr: |
 
 unit: req/s
 
+threshold:
+  warning: 0.01    # alert fires here; panel yellow
+  critical: 0.05   # panel red
+
 alert:
   name: MdCoreIntakeReminderErrorPre
   for: 2m
-  condition: "> 0.01"
   severity: warning
   summary: md-core IntakeReminderNotificationJob fallando — pacientes pueden perder recordatorios
 
@@ -29,6 +32,3 @@ panel:
   dashboard: pre-overview
   type: timeseries
   legend: intake-reminder
-  thresholds:
-    - { value: 0.01, color: yellow }
-    - { value: 0.05, color: red }

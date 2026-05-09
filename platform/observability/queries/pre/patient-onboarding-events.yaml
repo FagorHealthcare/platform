@@ -1,0 +1,28 @@
+id: patient-onboarding-events
+title: Eventos de onboarding de paciente (count/d)
+description: |
+  Eventos de alta de paciente: combina la creación del token de
+  activación ("Creating activation token for blister %s and phone
+  number %s") con la asignación efectiva del dispositivo
+  ("DISPOSITIVO %s ASIGNADO A PACIENTE %s"). Métrica de crecimiento.
+
+  Baseline 24h (9-may-2026): 0 onboardings — eventos esporádicos,
+  esperar bursts cuando haya despliegues de farmacia. Para
+  evolución del negocio interesa ventana semanal/mensual; aquí
+  uso 1d para que la línea sea estable cuando se observa.
+
+  Sin alerta — métrica exploratoria/de negocio.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(count_over_time({cluster="pre", container="md-core"}
+                      |~ "Creating activation token|DISPOSITIVO .* ASIGNADO A PACIENTE" [1d]))
+
+unit: count/d
+
+panel:
+  dashboard: pre-business
+  type: timeseries
+  legend: onboarding

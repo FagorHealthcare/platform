@@ -67,3 +67,31 @@ queries:
     cluster: pre
     file: pre/log-volume-by-container.yaml
     summary: log lines/s per container (panel-only — overall liveness)
+
+  # ------ business metrics (dashboard pre-business) -----------------
+  # Derived from md-core log line patterns. Panel-only first iteration —
+  # alerts to be added once baselines are established (1-2 weeks of obs).
+  - id: intake-confirmation-rate
+    cluster: pre
+    file: pre/intake-confirmation-rate.yaml
+    summary: tomas confirmadas vía SHC físico (adherencia)
+
+  - id: intake-missed-rate
+    cluster: pre
+    file: pre/intake-missed-rate.yaml
+    summary: tomas marcadas como olvidadas tras cerrarse la ventana
+
+  - id: whatsapp-outbound-rate
+    cluster: pre
+    file: pre/whatsapp-outbound-rate.yaml
+    summary: mensajes WhatsApp salientes (Twilio)
+
+  - id: daily-reports-requested
+    cluster: pre
+    file: pre/daily-reports-requested.yaml
+    summary: informes diarios solicitados por md-core
+
+  - id: patient-onboarding-events
+    cluster: pre
+    file: pre/patient-onboarding-events.yaml
+    summary: tokens de activación + asignaciones de dispositivo
