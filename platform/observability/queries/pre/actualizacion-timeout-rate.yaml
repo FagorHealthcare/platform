@@ -22,10 +22,13 @@ expr: |
 
 unit: req/s
 
+threshold:
+  warning: 0.02    # alert fires here; panel yellow
+  critical: 0.10   # panel red
+
 alert:
   name: ActualizacionTimeoutSpikePre
   for: 5m
-  condition: "> 0.02"
   severity: warning
   summary: Timeouts on /vN/actualizacion in pre exceed 0.02 req/s for 5m
 
@@ -33,6 +36,3 @@ panel:
   dashboard: pre-overview
   type: timeseries
   legend: "{{cluster}}"
-  thresholds:
-    - { value: 0.02, color: yellow }
-    - { value: 0.10, color: red }

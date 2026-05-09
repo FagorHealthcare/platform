@@ -1,0 +1,28 @@
+id: whatsapp-outbound-rate
+title: Mensajes WhatsApp salientes (count/h)
+description: |
+  Mensajes WhatsApp enviados por md-core a través de Twilio. La señal
+  son los logs de `ContentEditorWhatsappChannel` con la firma
+  `FROM: <number> - TO: <number> - MSG: <text>` que se emite cada vez
+  que se invoca el envío.
+
+  Baseline observado el 9-may-2026: 39 mensajes/24h (~1.6/h).
+
+  Sin alerta — primera iteración. Una alerta tipo "outbound a 0
+  durante franja activa 10-22h" es deseable pero requiere lógica
+  time-of-day no trivial en LogQL puro (cron-based silence en AM
+  podría ser más limpio). Pendiente.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(count_over_time({cluster="pre", container="md-core"}
+                      |~ "FROM:.*TO:.*MSG:" [1h]))
+
+unit: count/h
+
+panel:
+  dashboard: pre-business
+  type: timeseries
+  legend: outbound

@@ -26,10 +26,13 @@ expr: |
 
 unit: req/s
 
+threshold:
+  warning: 0.02    # alert fires here; panel yellow
+  critical: 0.10   # panel red
+
 alert:
   name: MdCoreNovelErrorBurstPre
   for: 2m
-  condition: "> 0.02"
   severity: warning
   summary: md-core con errores NO catalogados sostenidos > 6/5min — algo nuevo se ha roto
 
@@ -37,6 +40,3 @@ panel:
   dashboard: pre-overview
   type: timeseries
   legend: other
-  thresholds:
-    - { value: 0.02, color: yellow }
-    - { value: 0.10, color: red }

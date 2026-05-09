@@ -63,22 +63,27 @@ expr: |
 
 unit: req/s | ratio | seconds | count
 
+# Optional. Single source of truth for the alert's firing threshold AND
+# the panel's coloured guide lines. render.py derives both — they cannot
+# drift. The legacy fields `alert.condition` and `panel.thresholds` are
+# rejected to force the migration.
+threshold:
+  warning: 0.02   # alert fires here (if `alert:` block present); panel yellow line
+  critical: 0.10  # panel red line (no separate alert level for now)
+
 # Optional. Omit for panel-only queries.
 alert:
   name: <PascalCaseAlertName>
   for: <duration>           # e.g. 5m
-  condition: "> 0.05"       # threshold appended to expr at render time
   severity: warning | critical
   summary: <one-line for Slack>
+  comparator: ">"           # optional; default ">". Use "<" for low-side breaches.
 
 # Optional. Omit for alert-only queries.
 panel:
   dashboard: <dashboard-id>
   type: timeseries | logs | table | stat
   legend: "{{label_template}}"
-  thresholds:
-    - { value: 0.02, color: yellow }
-    - { value: 0.10, color: red }
 ```
 
 See `queries/pre/actualizacion-timeout-rate.yaml` for a complete worked

@@ -69,6 +69,55 @@ def load_queries() -> list[dict]:
     return out
 
 
+def alert_condition(q: dict) -> str:
+    """Derive the LogQL alert condition (e.g. '> 0.02') from `threshold.warning`.
+
+    `threshold.warning` is the single source of truth shared with the panel
+    (see `panel_thresholds`). The default comparator is `>`; use
+    `alert.comparator: '<'` for low-side breaches.
+    """
+    t = _threshold(q)
+    comparator = q.get("alert", {}).get("comparator", ">")
+    if comparator not in (">", "<", ">=", "<="):
+        sys.exit(f"{q['id']}: alert.comparator {comparator!r} not supported "
+                 "(use one of >, <, >=, <=)")
+    if "warning" not in t:
+        sys.exit(f"{q['id']}: alert needs `threshold.warning` to derive condition")
+    return f"{comparator} {t['warning']}"
+
+
+def panel_thresholds(q: dict) -> list[dict]:
+    """Derive panel threshold steps from the unified `threshold:` block.
+
+    Returns a list of `{value, color}` dicts in ascending order:
+      - threshold.warning → yellow
+      - threshold.critical → red
+    Either may be omitted; if both are absent the panel has no threshold lines.
+    """
+    t = _threshold(q)
+    out = []
+    if "warning" in t:
+        out.append({"value": t["warning"], "color": "yellow"})
+    if "critical" in t:
+        out.append({"value": t["critical"], "color": "red"})
+    return out
+
+
+def _threshold(q: dict) -> dict:
+    """Validate and return `q['threshold']` (or {} if absent).
+
+    Rejects the legacy `alert.condition` and `panel.thresholds` to force the
+    clean single-source-of-truth schema.
+    """
+    if q.get("alert", {}).get("condition") is not None:
+        sys.exit(f"{q['id']}: legacy `alert.condition` found — use "
+                 "top-level `threshold.warning` instead")
+    if q.get("panel", {}).get("thresholds") is not None:
+        sys.exit(f"{q['id']}: legacy `panel.thresholds` found — use "
+                 "top-level `threshold.{warning,critical}` instead")
+    return q.get("threshold", {}) or {}
+
+
 def render_ruler(queries: list[dict], outdir: Path) -> None:
     """Emit one Loki Ruler group per cluster, with all alerts for that cluster.
 
@@ -82,7 +131,7 @@ def render_ruler(queries: list[dict], outdir: Path) -> None:
         a = q["alert"]
         rule = {
             "alert": a["name"],
-            "expr": q["expr"].rstrip() + " " + a["condition"],
+            "expr": q["expr"].rstrip() + " " + alert_condition(q),
             "for": a["for"],
             "labels": {
                 "severity": a["severity"],
@@ -179,13 +228,10 @@ def panel_for(q: dict) -> dict:
     }.get(p["type"], "TimeSeriesChart")
 
     plugin_spec: dict = {}
-    if p["type"] == "timeseries" and p.get("thresholds"):
-        plugin_spec["thresholds"] = {
-            "steps": [
-                {"value": t["value"], "color": t["color"]}
-                for t in p["thresholds"]
-            ],
-        }
+    if p["type"] == "timeseries":
+        steps = panel_thresholds(q)
+        if steps:
+            plugin_spec["thresholds"] = {"steps": steps}
 
     return {
         "kind": "Panel",

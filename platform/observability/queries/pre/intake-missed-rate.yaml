@@ -1,0 +1,26 @@
+id: intake-missed-rate
+title: Tomas olvidadas (count/h)
+description: |
+  Número de tomas marcadas como olvidadas por el SHC físico
+  (mensaje TOMA OLVIDADA emitido por md-core cuando se cierra la
+  ventana de confirmación sin que el paciente haya confirmado).
+
+  Sin alerta — primera iteración. Una ratio sostenida elevada
+  frente a `intake-confirmation-rate` es la señal interesante,
+  pero queremos observar baseline durante un par de semanas
+  antes de calibrar el umbral. En las últimas 24h hay 0
+  registros, así que no podemos estimar baseline todavía.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(count_over_time({cluster="pre", container="md-core"}
+                      |~ "TOMA OLVIDADA" [1h]))
+
+unit: count/h
+
+panel:
+  dashboard: pre-business
+  type: timeseries
+  legend: missed

@@ -26,10 +26,12 @@ unit: req/s
 # Mantengo el panel para visualizar la subserie específica de
 # "Request failed" cuando se investigue manualmente.
 
+threshold:
+  warning: 0.01    # panel yellow
+  critical: 0.05   # panel red
+  # No alert block — covered as part of MdCoreNovelErrorBurstPre's catchall.
+
 panel:
   dashboard: pre-overview
   type: timeseries
   legend: md-core
-  thresholds:
-    - { value: 0.01, color: yellow }
-    - { value: 0.05, color: red }

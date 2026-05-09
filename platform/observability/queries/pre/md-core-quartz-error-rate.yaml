@@ -21,10 +21,15 @@ expr: |
 
 unit: req/s
 
+# Single source of truth for the panel's yellow/red lines AND the alert's
+# firing condition. render.py derives both from this block.
+threshold:
+  warning: 0.1     # alert fires here; panel yellow
+  critical: 0.5    # panel red
+
 alert:
   name: MdCoreQuartzErrorAggravationPre
   for: 5m
-  condition: "> 0.1"
   severity: warning
   summary: md-core Quartz error rate disparado por encima del baseline conocido
 
@@ -32,6 +37,3 @@ panel:
   dashboard: pre-overview
   type: timeseries
   legend: quartz
-  thresholds:
-    - { value: 0.1, color: yellow }
-    - { value: 0.5, color: red }
