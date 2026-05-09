@@ -1,0 +1,37 @@
+id: md-core-quartz-error-rate
+title: md-core Quartz infra errors (req/s)
+description: |
+  Tasa de errores procedentes de Quartz: ClusterManager check-in,
+  MisfireHandler, JobStore lock acquisition. Originados por que las
+  tablas qrtz_* no existen en la BD de pre — issue documentado en
+  docs/INCIDENTS.md (entrada 2026-05-09).
+
+  Baseline observado el 9-may: ~215 eventos/12h (~0.005 req/s).
+  Umbral > 0.1 req/s ≈ 20x baseline: no dispara con el ruido
+  conocido, sí dispara si Quartz se degrada todavía más (p.ej.
+  caída de la BD que lo agrave o nuevos errores Hibernate
+  encadenados).
+runbook: docs/INCIDENTS.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="md-core"}
+           |~ "JobStoreCMT|ClusterManager|qrtz_|MisfireHandler|JobStoreSupport|QuartzScheduler" [5m]))
+
+unit: req/s
+
+alert:
+  name: MdCoreQuartzErrorAggravationPre
+  for: 5m
+  condition: "> 0.1"
+  severity: warning
+  summary: md-core Quartz error rate disparado por encima del baseline conocido
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: quartz
+  thresholds:
+    - { value: 0.1, color: yellow }
+    - { value: 0.5, color: red }

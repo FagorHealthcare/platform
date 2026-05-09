@@ -21,12 +21,10 @@ expr: |
 
 unit: req/s
 
-alert:
-  name: MdCoreRequestFailedBurstPre
-  for: 2m
-  condition: "> 0.01"
-  severity: warning
-  summary: md-core "Request failed" sostenido > 3 errores/5min en pre
+# Sin alerta: el alert MdCoreNovelErrorBurstPre cubre este patrón
+# como parte de la categoría "other-error" (errores no catalogados).
+# Mantengo el panel para visualizar la subserie específica de
+# "Request failed" cuando se investigue manualmente.
 
 panel:
   dashboard: pre-overview

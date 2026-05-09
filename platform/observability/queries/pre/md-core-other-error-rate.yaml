@@ -1,0 +1,42 @@
+id: md-core-other-error-rate
+title: md-core errors NO catalogados (req/s)
+description: |
+  Tasa de errores/excepciones de md-core EXCLUYENDO las categorías
+  conocidas:
+    - Quartz infra (qrtz_* tables missing — ver INCIDENTS 2026-05-09)
+    - dailyReport SOLICITADO not found (ruido de negocio)
+    - IntakeReminderNotificationJob (tiene su propio alert)
+
+  Esta es la red de seguridad: cuando aparece un error nuevo
+  inesperado, dispara aquí. Por construcción, su baseline debería
+  ser bajísimo — cualquier elevación sostenida indica que algo
+  nuevo se ha roto.
+
+  Baseline observado el 9-may: ~27 eventos/12h (~0.0006 req/s).
+  Umbral > 0.02 req/s (= 6 en 5 min) ≈ 30x baseline.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="md-core"}
+           |~ "(?i)error|exception"
+           !~ "JobStoreCMT|ClusterManager|qrtz_|MisfireHandler|JobStoreSupport|QuartzScheduler|dailyReport SOLICITADO|PeriodicNotificationGenerator|IntakeReminderNotificationJob"
+           [5m]))
+
+unit: req/s
+
+alert:
+  name: MdCoreNovelErrorBurstPre
+  for: 2m
+  condition: "> 0.02"
+  severity: warning
+  summary: md-core con errores NO catalogados sostenidos > 6/5min — algo nuevo se ha roto
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: other
+  thresholds:
+    - { value: 0.02, color: yellow }
+    - { value: 0.10, color: red }

@@ -40,82 +40,6 @@ spec:
                          | status="504" [5m])
                   )
                 seriesNameFormat: '{{cluster}}'
-    md_core_request_failed_rate:
-      kind: Panel
-      spec:
-        display:
-          name: md-core "Request failed" (req/s)
-        plugin:
-          kind: TimeSeriesChart
-          spec:
-            thresholds:
-              steps:
-              - value: 0.01
-                color: yellow
-              - value: 0.05
-                color: red
-        queries:
-        - kind: TimeSeriesQuery
-          spec:
-            plugin:
-              kind: PrometheusTimeSeriesQuery
-              spec:
-                datasource:
-                  kind: PrometheusDatasource
-                  name: loki-pre
-                query: |-
-                  sum(rate({cluster="pre", container="md-core"}
-                           |= "Request failed" [5m]))
-                seriesNameFormat: md-core
-    md_core_error_rate:
-      kind: Panel
-      spec:
-        display:
-          name: md-core errors/exceptions (req/s)
-        plugin:
-          kind: TimeSeriesChart
-          spec:
-            thresholds:
-              steps:
-              - value: 0.02
-                color: yellow
-              - value: 0.1
-                color: red
-        queries:
-        - kind: TimeSeriesQuery
-          spec:
-            plugin:
-              kind: PrometheusTimeSeriesQuery
-              spec:
-                datasource:
-                  kind: PrometheusDatasource
-                  name: loki-pre
-                query: |-
-                  sum(rate({cluster="pre", container="md-core"}
-                           |~ "(?i)error|exception" [5m]))
-                seriesNameFormat: md-core
-    log_volume_by_container:
-      kind: Panel
-      spec:
-        display:
-          name: Volumen de log por contenedor (líneas/s)
-        plugin:
-          kind: TimeSeriesChart
-          spec: {}
-        queries:
-        - kind: TimeSeriesQuery
-          spec:
-            plugin:
-              kind: PrometheusTimeSeriesQuery
-              spec:
-                datasource:
-                  kind: PrometheusDatasource
-                  name: loki-pre
-                query: |-
-                  sum by (container) (
-                    rate({cluster="pre"} [5m])
-                  )
-                seriesNameFormat: '{{container}}'
     ingress_status_rate:
       kind: Panel
       spec:
@@ -170,6 +94,137 @@ spec:
                   sum(rate({cluster="pre", container="controller"}
                            |~ "actualizacion" [5m]))
                 seriesNameFormat: ratio 504/total
+    md_core_quartz_error_rate:
+      kind: Panel
+      spec:
+        display:
+          name: md-core Quartz infra errors (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            thresholds:
+              steps:
+              - value: 0.1
+                color: yellow
+              - value: 0.5
+                color: red
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="md-core"}
+                           |~ "JobStoreCMT|ClusterManager|qrtz_|MisfireHandler|JobStoreSupport|QuartzScheduler" [5m]))
+                seriesNameFormat: quartz
+    md_core_dailyreport_not_found_rate:
+      kind: Panel
+      spec:
+        display:
+          name: md-core "dailyReport SOLICITADO no encontrado" (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec: {}
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="md-core"}
+                           |~ "dailyReport SOLICITADO|PeriodicNotificationGenerator" [5m]))
+                seriesNameFormat: dailyReport-not-found
+    md_core_intake_reminder_error_rate:
+      kind: Panel
+      spec:
+        display:
+          name: md-core IntakeReminderNotificationJob errors (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            thresholds:
+              steps:
+              - value: 0.01
+                color: yellow
+              - value: 0.05
+                color: red
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="md-core"}
+                           |~ "IntakeReminderNotificationJob" [5m]))
+                seriesNameFormat: intake-reminder
+    md_core_other_error_rate:
+      kind: Panel
+      spec:
+        display:
+          name: md-core errors NO catalogados (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            thresholds:
+              steps:
+              - value: 0.02
+                color: yellow
+              - value: 0.1
+                color: red
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="md-core"}
+                           |~ "(?i)error|exception"
+                           !~ "JobStoreCMT|ClusterManager|qrtz_|MisfireHandler|JobStoreSupport|QuartzScheduler|dailyReport SOLICITADO|PeriodicNotificationGenerator|IntakeReminderNotificationJob"
+                           [5m]))
+                seriesNameFormat: other
+    md_core_request_failed_rate:
+      kind: Panel
+      spec:
+        display:
+          name: md-core "Request failed" (req/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            thresholds:
+              steps:
+              - value: 0.01
+                color: yellow
+              - value: 0.05
+                color: red
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum(rate({cluster="pre", container="md-core"}
+                           |= "Request failed" [5m]))
+                seriesNameFormat: md-core
     md_core_no_programming_rate:
       kind: Panel
       spec:
@@ -191,6 +246,28 @@ spec:
                   sum(rate({cluster="pre", container="md-core"}
                            |= "No programming found for device" [5m]))
                 seriesNameFormat: md-core
+    log_volume_by_container:
+      kind: Panel
+      spec:
+        display:
+          name: Volumen de log por contenedor (líneas/s)
+        plugin:
+          kind: TimeSeriesChart
+          spec: {}
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                datasource:
+                  kind: PrometheusDatasource
+                  name: loki-pre
+                query: |-
+                  sum by (container) (
+                    rate({cluster="pre"} [5m])
+                  )
+                seriesNameFormat: '{{container}}'
   layouts:
   - kind: Grid
     spec:
@@ -208,34 +285,52 @@ spec:
         width: 12
         height: 8
         content:
-          $ref: '#/spec/panels/md_core_request_failed_rate'
-      - x: 0
-        y: 8
-        width: 12
-        height: 8
-        content:
-          $ref: '#/spec/panels/md_core_error_rate'
-      - x: 12
-        y: 8
-        width: 12
-        height: 8
-        content:
-          $ref: '#/spec/panels/log_volume_by_container'
-      - x: 0
-        y: 16
-        width: 12
-        height: 8
-        content:
           $ref: '#/spec/panels/ingress_status_rate'
-      - x: 12
-        y: 16
+      - x: 0
+        y: 8
         width: 12
         height: 8
         content:
           $ref: '#/spec/panels/actualizacion_failure_ratio'
+      - x: 12
+        y: 8
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/md_core_quartz_error_rate'
+      - x: 0
+        y: 16
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/md_core_dailyreport_not_found_rate'
+      - x: 12
+        y: 16
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/md_core_intake_reminder_error_rate'
       - x: 0
         y: 24
         width: 12
         height: 8
         content:
+          $ref: '#/spec/panels/md_core_other_error_rate'
+      - x: 12
+        y: 24
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/md_core_request_failed_rate'
+      - x: 0
+        y: 32
+        width: 12
+        height: 8
+        content:
           $ref: '#/spec/panels/md_core_no_programming_rate'
+      - x: 12
+        y: 32
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/log_volume_by_container'

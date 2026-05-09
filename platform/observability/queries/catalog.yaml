@@ -12,28 +12,12 @@
 
 queries:
 
+  # ------ ingress / public-facing -----------------------------------
   - id: actualizacion-timeout-rate
     cluster: pre
     file: pre/actualizacion-timeout-rate.yaml
     summary: 504s on /vN/actualizacion (NodeRed → Google Sheets timeouts)
     motivated_by: incident 2026-05-08
-
-  - id: md-core-request-failed-rate
-    cluster: pre
-    file: pre/md-core-request-failed-rate.yaml
-    summary: md-core "Request failed" rate (5xx-wrapping log line)
-    motivated_by: investigation 2026-05-08 (Hallazgo B — IntakeNotFoundException)
-
-  - id: md-core-error-rate
-    cluster: pre
-    file: pre/md-core-error-rate.yaml
-    summary: md-core total error/exception rate (broad health signal)
-    motivated_by: baseline characterization 2026-05-08
-
-  - id: log-volume-by-container
-    cluster: pre
-    file: pre/log-volume-by-container.yaml
-    summary: log lines/s per container (panel-only — overall liveness)
 
   - id: ingress-status-rate
     cluster: pre
@@ -45,7 +29,41 @@ queries:
     file: pre/actualizacion-failure-ratio.yaml
     summary: ratio of /actualizacion 504s to total /actualizacion calls
 
+  # ------ md-core breakdown by error category -----------------------
+  # Categorize so we can tell apart known-noise from genuinely-new
+  # signals. Catchall is `md-core-other-error-rate`.
+  - id: md-core-quartz-error-rate
+    cluster: pre
+    file: pre/md-core-quartz-error-rate.yaml
+    summary: Quartz JobStore errors (qrtz_* tables missing — see INCIDENTS 2026-05-09)
+
+  - id: md-core-dailyreport-not-found-rate
+    cluster: pre
+    file: pre/md-core-dailyreport-not-found-rate.yaml
+    summary: PeriodicNotificationGenerator "dailyReport SOLICITADO" not-found rate (panel)
+
+  - id: md-core-intake-reminder-error-rate
+    cluster: pre
+    file: pre/md-core-intake-reminder-error-rate.yaml
+    summary: IntakeReminderNotificationJob errors (medication reminder failures)
+
+  - id: md-core-other-error-rate
+    cluster: pre
+    file: pre/md-core-other-error-rate.yaml
+    summary: catchall for md-core errors NOT in the categorized buckets above
+
+  - id: md-core-request-failed-rate
+    cluster: pre
+    file: pre/md-core-request-failed-rate.yaml
+    summary: md-core "Request failed" rate (panel only — covered by other-error alert)
+
   - id: md-core-no-programming-rate
     cluster: pre
     file: pre/md-core-no-programming-rate.yaml
     summary: md-core "No programming found for device" rate (under-characterized pattern)
+
+  # ------ overall liveness / cross-cutting --------------------------
+  - id: log-volume-by-container
+    cluster: pre
+    file: pre/log-volume-by-container.yaml
+    summary: log lines/s per container (panel-only — overall liveness)

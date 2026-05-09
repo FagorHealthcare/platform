@@ -1,0 +1,34 @@
+id: md-core-intake-reminder-error-rate
+title: md-core IntakeReminderNotificationJob errors (req/s)
+description: |
+  Tasa de errores en el job de recordatorio de tomas. Crítico de
+  negocio: cuando este job falla, pacientes pueden perder
+  notificaciones WhatsApp/SMS de medicación.
+
+  Baseline observado el 9-may: 11 eventos/12h. Umbral > 0.01 req/s
+  (= 3 errores en 5 min) — fires en cualquier ráfaga real, no en
+  el goteo ocasional.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="md-core"}
+           |~ "IntakeReminderNotificationJob" [5m]))
+
+unit: req/s
+
+alert:
+  name: MdCoreIntakeReminderErrorPre
+  for: 2m
+  condition: "> 0.01"
+  severity: warning
+  summary: md-core IntakeReminderNotificationJob fallando — pacientes pueden perder recordatorios
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: intake-reminder
+  thresholds:
+    - { value: 0.01, color: yellow }
+    - { value: 0.05, color: red }

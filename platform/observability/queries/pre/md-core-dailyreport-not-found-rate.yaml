@@ -1,0 +1,26 @@
+id: md-core-dailyreport-not-found-rate
+title: md-core "dailyReport SOLICITADO no encontrado" (req/s)
+description: |
+  Tasa de mensajes "NO SE HA ENCONTRADO EL dailyReport SOLICITADO PARA
+  '<código>'", emitidos por PeriodicNotificationGenerator. Cada uno es
+  un usuario/dispositivo que no tiene dailyReport generado al momento
+  de la consulta — probablemente ruido legítimo de negocio (usuarios
+  recién dados de alta, sin actividad aún).
+
+  Baseline observado el 9-may: ~116 eventos/12h (~0.003 req/s).
+  Sin alerta agresivo — sólo panel para caracterizar el patrón.
+  Cuando se entienda mejor (es esperado o no?) decidimos umbral.
+runbook: docs/loki/queries.md
+
+cluster: pre
+
+expr: |
+  sum(rate({cluster="pre", container="md-core"}
+           |~ "dailyReport SOLICITADO|PeriodicNotificationGenerator" [5m]))
+
+unit: req/s
+
+panel:
+  dashboard: pre-overview
+  type: timeseries
+  legend: dailyReport-not-found

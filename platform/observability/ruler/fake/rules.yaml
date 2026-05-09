@@ -28,46 +28,71 @@ groups:
         los detalles arquitecturales en docs/loki/queries.md
         (sección "Investigación 2026-05-08 — Hallazgo A").
       runbook: docs/loki/queries.md
-  - alert: MdCoreRequestFailedBurstPre
+  - alert: MdCoreQuartzErrorAggravationPre
     expr: |-
       sum(rate({cluster="pre", container="md-core"}
-               |= "Request failed" [5m])) > 0.01
+               |~ "JobStoreCMT|ClusterManager|qrtz_|MisfireHandler|JobStoreSupport|QuartzScheduler" [5m])) > 0.1
+    for: 5m
+    labels:
+      severity: warning
+      cluster: pre
+    annotations:
+      summary: md-core Quartz error rate disparado por encima del baseline conocido
+      description: |-
+        Tasa de errores procedentes de Quartz: ClusterManager check-in,
+        MisfireHandler, JobStore lock acquisition. Originados por que las
+        tablas qrtz_* no existen en la BD de pre — issue documentado en
+        docs/INCIDENTS.md (entrada 2026-05-09).
+
+        Baseline observado el 9-may: ~215 eventos/12h (~0.005 req/s).
+        Umbral > 0.1 req/s ≈ 20x baseline: no dispara con el ruido
+        conocido, sí dispara si Quartz se degrada todavía más (p.ej.
+        caída de la BD que lo agrave o nuevos errores Hibernate
+        encadenados).
+      runbook: docs/INCIDENTS.md
+  - alert: MdCoreIntakeReminderErrorPre
+    expr: |-
+      sum(rate({cluster="pre", container="md-core"}
+               |~ "IntakeReminderNotificationJob" [5m])) > 0.01
     for: 2m
     labels:
       severity: warning
       cluster: pre
     annotations:
-      summary: md-core "Request failed" sostenido > 3 errores/5min en pre
+      summary: md-core IntakeReminderNotificationJob fallando — pacientes pueden perder recordatorios
       description: |-
-        Cuenta las líneas de log de md-core con el mensaje exacto
-        "Request failed". Es el envoltorio que md-core mete cada vez que un
-        endpoint HTTP devuelve un 5xx — el cliente más visible en los datos
-        de hoy es /shc/event con `IntakeNotFoundException` para pacientes
-        con desync entre SHC y backend.
+        Tasa de errores en el job de recordatorio de tomas. Crítico de
+        negocio: cuando este job falla, pacientes pueden perder
+        notificaciones WhatsApp/SMS de medicación.
 
-        Baseline observado el 2026-05-08: 9 líneas en 12 h
-        (~0.0002 req/s = ~0.0125/min). El umbral está calibrado para que
-        el alert dispare cuando aparecen 3 o más en 5 min — patrón típico
-        de un blister/treatment concreto que se está machacando.
+        Baseline observado el 9-may: 11 eventos/12h. Umbral > 0.01 req/s
+        (= 3 errores en 5 min) — fires en cualquier ráfaga real, no en
+        el goteo ocasional.
       runbook: docs/loki/queries.md
-  - alert: MdCoreErrorBurstPre
+  - alert: MdCoreNovelErrorBurstPre
     expr: |-
       sum(rate({cluster="pre", container="md-core"}
-               |~ "(?i)error|exception" [5m])) > 0.02
+               |~ "(?i)error|exception"
+               !~ "JobStoreCMT|ClusterManager|qrtz_|MisfireHandler|JobStoreSupport|QuartzScheduler|dailyReport SOLICITADO|PeriodicNotificationGenerator|IntakeReminderNotificationJob"
+               [5m])) > 0.02
     for: 2m
     labels:
       severity: warning
       cluster: pre
     annotations:
-      summary: md-core errores/excepciones > 6/5min sostenido en pre
+      summary: md-core con errores NO catalogados sostenidos > 6/5min — algo nuevo se ha roto
       description: |-
-        Tasa de líneas de md-core que contienen "error" o "exception"
-        (case-insensitive). Captura todo el espectro: stack traces, `Request
-        failed`, "No programming found for device", parsing errors, etc.
+        Tasa de errores/excepciones de md-core EXCLUYENDO las categorías
+        conocidas:
+          - Quartz infra (qrtz_* tables missing — ver INCIDENTS 2026-05-09)
+          - dailyReport SOLICITADO not found (ruido de negocio)
+          - IntakeReminderNotificationJob (tiene su propio alert)
 
-        Baseline observado el 2026-05-08: 44 líneas en 12 h
-        (~0.001 req/s = ~0.061/min = ~3.7/h). Umbral calibrado para
-        ~20x baseline (6 errores en 5 min sostenido 2 min): no dispara con
-        el ruido habitual, sí dispara cuando hay un cluster real de errores
-        como el de la ventana 13:00-14:00 UTC del 8-May.
+        Esta es la red de seguridad: cuando aparece un error nuevo
+        inesperado, dispara aquí. Por construcción, su baseline debería
+        ser bajísimo — cualquier elevación sostenida indica que algo
+        nuevo se ha roto.
+
+        Baseline observado el 9-may: ~27 eventos/12h (~0.0006 req/s).
+        Umbral > 0.02 req/s (= 6 en 5 min) ≈ 30x baseline.
       runbook: docs/loki/queries.md
