@@ -336,3 +336,188 @@ con micros).
 - Sheet de **LOG histórico** (1LX4…) — append-only desde todos los flows
 - Service account: `cuenta-node-red@medical-dispenser.iam.gserviceaccount.com`
 - Proyecto NodeRed activo: `/data/projects/FMDFlows/flows.json`
+
+---
+
+## Identificadores de negocio (MDC en md-core)
+
+md-core emite los logs en JSON con campos a nivel raíz para
+`phone`, `blister`, `treatment`, `seguimiento`, `user` cuando el
+contexto los conoce. Vector NO los promueve a labels en Loki (saturaría
+la cardinalidad), así que el patrón base es:
+
+> bajar las líneas raw y filtrar/agregar **client-side con `jq`**
+
+Probado: el filtro server-side `| json | blister="X"` falla en
+combinación con la estructura nested de vector (campo `kubernetes`
+lleva sub-objetos). Mantenemos el `| json` server-side fuera y tiramos
+de jq sobre `.line`.
+
+Campos disponibles en `.line` (no todos siempre populados; ausencia o
+valor `"-"` significa "el código que emitió este log no tenía contexto"):
+
+| campo         | qué es                                                          |
+|---------------|-----------------------------------------------------------------|
+| `phone`       | número E.164 con `+` (e.g. `+34628007291`)                      |
+| `blister`     | código corto del blister físico (e.g. `H7BXCI`, `99TGJG`)       |
+| `treatment`   | id numérico del tratamiento (e.g. `12878326`)                    |
+| `seguimiento` | id numérico del seguimiento del paciente                         |
+| `user`        | nombre o id del paciente (e.g. `Carlota`, `0000000085`)          |
+| `level`       | INFO / WARN / ERROR                                             |
+| `message`     | el mensaje formateado                                           |
+
+### #20 — Top identifiers en las últimas 24h
+
+Top blisters más activos (excluye los `"-"` y los `null`):
+
+```bash
+logcli query --quiet --output=jsonl --limit=5000 --since=24h \
+  '{cluster="pre", container="md-core"}' \
+  | jq -r '.line | fromjson? | .blister // empty | select(. != "-")' \
+  | sort | uniq -c | sort -rn | head -20
+```
+
+Resultado real (24h, 9-may-2026):
+
+```
+  27 JC1PKZ
+  23 VE6MSK
+  22 LEHXZE
+  21 8H5XI9
+  19 MVQQFL
+  ...
+```
+
+Loop para cualquier campo:
+
+```bash
+for field in phone blister treatment seguimiento user; do
+  echo "=== top $field ==="
+  logcli query --quiet --output=jsonl --limit=5000 --since=24h \
+    '{cluster="pre", container="md-core"}' \
+    | jq -r --arg f "$field" '.line | fromjson? | .[$f] // empty | select(. != "-")' \
+    | sort | uniq -c | sort -rn | head -5
+done
+```
+
+> Si el `--limit=5000` se queda corto (la query es de 24h y md-core emite
+> ~8500 líneas/día), sube el límite o reduce la ventana con `--since=6h`.
+
+### #21 — Toda la actividad de un identificador concreto
+
+Drill-down: dame todos los eventos relacionados con un blister,
+ordenados cronológicamente. Aquí sí filtramos en jq:
+
+```bash
+BLISTER=JC1PKZ
+
+logcli query --quiet --output=jsonl --limit=2000 --since=7d \
+  '{cluster="pre", container="md-core"}' \
+  | jq -r --arg b "$BLISTER" '
+      .line | fromjson? | select(.blister == $b)
+      | [.timestamp // "-", .level, .message] | @tsv' \
+  | sort
+```
+
+Lo mismo por teléfono o por tratamiento:
+
+```bash
+PHONE='+34628007291'
+logcli query --quiet --output=jsonl --limit=2000 --since=7d \
+  '{cluster="pre", container="md-core"}' \
+  | jq -r --arg p "$PHONE" '
+      .line | fromjson? | select(.phone == $p)
+      | [.level, .message] | @tsv'
+
+TREATMENT=12878326
+logcli query --quiet --output=jsonl --limit=2000 --since=7d \
+  '{cluster="pre", container="md-core"}' \
+  | jq -r --arg t "$TREATMENT" '
+      .line | fromjson? | select(.treatment == $t)
+      | [.level, .message] | @tsv'
+```
+
+### #22 — Caso de paciente: del blister al teléfono y al tratamiento
+
+Cuando llega una queja "el blister X no manda mensajes", la cadena
+útil suele ser: encontrar el `(blister, treatment, phone)` asociado y
+mirar errores recientes.
+
+```bash
+BLISTER=JC1PKZ
+
+# 1) Tripleta única (blister, treatment, phone) que aparece en logs
+logcli query --quiet --output=jsonl --limit=2000 --since=7d \
+  '{cluster="pre", container="md-core"}' \
+  | jq -r --arg b "$BLISTER" '
+      .line | fromjson? | select(.blister == $b and .phone != null and .phone != "-")
+      | [.blister, .treatment, .phone] | @tsv' \
+  | sort -u
+
+# 2) Sólo errores que mencionen ese blister
+logcli query --quiet --output=jsonl --limit=2000 --since=7d \
+  '{cluster="pre", container="md-core"}' \
+  | jq -r --arg b "$BLISTER" '
+      .line | fromjson? | select(.blister == $b and .level == "ERROR")
+      | .message'
+
+# 3) Mensajes WhatsApp salientes hacia el phone descubierto en (1)
+PHONE='+34628007291'
+logcli query --quiet --output=jsonl --limit=200 --since=24h \
+  '{cluster="pre", container="md-core"} |~ "FROM:.*TO:.*MSG:"' \
+  | jq -r --arg p "$PHONE" '
+      .line | fromjson? | select(.phone == $p) | .message'
+```
+
+### #23 — Quiénes han enviado WhatsApp y a quién
+
+Pares (FROM Twilio number, TO patient phone) en 12 h, por volumen:
+
+```bash
+logcli query --quiet --output=raw --limit=2000 --since=12h \
+  '{cluster="pre", container="md-core"} |~ "FROM:.*TO:.*MSG:"' \
+  | grep -oE 'FROM: \S+ - TO: \S+' \
+  | sort | uniq -c | sort -rn | head -10
+```
+
+> Útil para detectar "este paciente está recibiendo demasiados mensajes"
+> o "este FROM (Twilio number) ya no funciona" antes de mirar Twilio
+> console. `--output=raw` aquí está bien porque la firma `FROM ... TO ...`
+> está literalmente en el mensaje.
+
+### #24 — Adherencia: confirmadas vs olvidadas por usuario
+
+```bash
+for ev in "TOMA CONFIRMADA" "TOMA OLVIDADA"; do
+  echo "=== $ev (24h) ==="
+  logcli query --quiet --output=jsonl --limit=2000 --since=24h \
+    "{cluster=\"pre\", container=\"md-core\"} |~ \"$ev\"" \
+    | jq -r '.line | fromjson? | .user // empty | select(. != "-")' \
+    | sort | uniq -c | sort -rn | head -10
+done
+```
+
+### #25 — Verificar que un blister está siendo "scheduleado"
+
+```bash
+BLISTER=JC1PKZ
+logcli query --quiet --output=jsonl --limit=200 --since=24h \
+  "{cluster=\"pre\", container=\"md-core\"} |~ \"scheduling|scheduled|Solicitado informe\"" \
+  | jq -r --arg b "$BLISTER" '
+      .line | fromjson? | select(.blister == $b) | .message'
+```
+
+Si el blister existe en BD pero no aparece nada aquí en 24h, el
+`NotificationSchedulerService` no lo está procesando — buen punto
+de partida para investigar el caso.
+
+### Tip: ver el shape completo de una línea
+
+Cuando el campo no está donde esperas (vector cambia, md-core añade
+nuevos MDCs), inspecciona una línea representativa:
+
+```bash
+logcli query --quiet --output=jsonl --limit=1 --since=1h \
+  '{cluster="pre", container="md-core"} |~ "Blister.*available"' \
+  | jq '.line | fromjson | {message, blister, treatment, phone, user, "all-keys": keys}'
+```
