@@ -521,3 +521,95 @@ logcli query --quiet --output=jsonl --limit=1 --since=1h \
   '{cluster="pre", container="md-core"} |~ "Blister.*available"' \
   | jq '.line | fromjson | {message, blister, treatment, phone, user, "all-keys": keys}'
 ```
+
+---
+
+## Exploración 2026-05-09 — anomalías de blister numérico y de WhatsApp
+
+Ventana: 30 h alrededor del 9-may-2026 (lo que retiene Loki desde
+arranque del stack).
+
+### Hallazgo A — MDC `blister` contaminado por dos espacios de IDs
+
+El MDC `blister` carga **dos esquemas de id distintos** según el code path:
+
+| Origen del log                                            | Forma del id      | Ejemplo                |
+|-----------------------------------------------------------|-------------------|------------------------|
+| Resto de md-core (jobs, scheduler, WhatsApp, sync)        | 6-char alfanum    | `JC1PKZ`, `H7BXCI`     |
+| `com.medicaldispenser.shc.http.ShcController` `SHCEvent`  | numérico pequeño  | `0`, `837`, `1168`     |
+
+13 IDs numéricos distintos vistos en 30 h, todos con el patrón
+`SHCEvent: Device: %s, Blister: <numérico> - <evt>(...) => ...`.
+El `0` aparece como sentinel ("Blister insertado correctamente"
+con id 0) y huele a default no-inicializado.
+
+**Impacto operativo**: las recetas #21 y #22 (drill-down por
+blister) **no encuentran** los eventos del SHC físico cuando se
+busca por el token alfanumérico. Si un paciente reporta un
+problema con `H7BXCI`, la pista del dispositivo (qué tomas
+registró, errores hardware, etc.) se queda fuera del resultado.
+
+**Fix propuesto** (md-core, no urgente): que `ShcController`
+mapee el id numérico del firmware al token alfanumérico antes
+de poblar el MDC, o que use un MDC distinto (`shcBlister`) y
+documentemos los dos.
+
+### Hallazgo B — UX: usuario reconfirma toma ya registrada (Fernando, +34618039024)
+
+Tres mensajes idénticos `"La última toma ya se ha registrado, ya
+hablamos en la siguiente."` enviados en 41 h, con SIDs inbound
+distintos cada vez. Es el usuario pulsando el botón "confirmar"
+**después de que el sistema ya cerró la toma**.
+
+**Issue UX, no bug**: la respuesta es informativa pero no rompe
+el bucle conversacional — el paciente no sabe **cuándo** será la
+siguiente y vuelve a pulsar.
+
+**Fix propuesto** (md-core, conversational layer): incluir hora
+o blister-info en la respuesta. Algo como `"Hoy ya estás al día.
+La siguiente toma es a las HH:MM."`
+
+### Hallazgo C — UX: doble respuesta a doble inbound (Francisco, +34647904694)
+
+Dos veces en 30 h, Francisco mandó dos mensajes inbound separados
+por **41–90 µs** (SIDs distintos). md-core los procesa en paralelo
+y responde 👍 a cada uno. Resultado: el usuario recibe doble emoji.
+
+**Issue UX**: probablemente cliente WhatsApp re-enviando, o
+double-tap en interfaz. Ruido para el paciente.
+
+**Fix propuesto** (md-core, `UserMessageReceiver`): dedup por
+`(phone, message, ventana 5s)` antes de despachar. Implica una
+tabla in-memory pequeña con TTL.
+
+### Hallazgo D — Bug de logging: vCard logueado como `MSG: ` vacío
+
+3 mensajes a `+34689028042` ("FARMACIA PRUEBA") en 52 µs:
+
+```
+14:55:04.563878 — ¡Hola FARMACIA PRUEBA!
+14:55:04.563904 — Si quieres puedes añadirme como contacto...
+14:55:04.563930 — <empty>
+```
+
+El tercero con `MSG:` vacío es casi seguro un envío de **vCard**
+(tarjeta de contacto Twilio) — payload binario, body vacío. El
+log line lo expone como ruido visual.
+
+**Fix propuesto** (md-core,
+`ContentEditorWhatsappChannel.send(...)`): cuando `mediaUrl !=
+null`, loguear `MEDIA: <url>` en lugar de (o además de)
+`MSG: <empty>`.
+
+### Lo que NO encontré (importante para la confianza en la app WhatsApp)
+
+- **0 hits** de `Error enviando template`, `Twilio.*error`,
+  `whatsapp.*error` en 30 h.
+- **No bombing**: 1 sólo número FROM, máximo 6 mensajes a un
+  mismo TO en 30 h.
+- **No retry-loop del backend**: las repeticiones identificadas
+  son siempre triggered por inbound del usuario, no por reintentos
+  internos.
+
+El canal WhatsApp está sano funcionalmente; los issues son de UX
+y logging, no de fiabilidad de envío.
