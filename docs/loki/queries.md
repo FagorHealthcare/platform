@@ -613,3 +613,246 @@ null`, loguear `MEDIA: <url>` en lugar de (o además de)
 
 El canal WhatsApp está sano funcionalmente; los issues son de UX
 y logging, no de fiabilidad de envío.
+
+---
+
+## Exploración 2026-05-11 — consolidación de errores 96h
+
+Ventana: **2026-05-08T12:10 → 2026-05-11T19:01 UTC** (~80 h, todo
+lo retenido por Loki desde arranque del stack).
+
+- Total líneas md-core: **27 139**
+- Líneas ERROR/Exception:  **1 092**  (4 %)
+- Errores con identifier de negocio: **645**  (59 %)
+- Errores de infra sin identifier:    **447**  (41 %)
+
+Ningún error de transporte cae sin contexto identificable: o
+adjuntan `blister`/`treatment`/`user` o nacen de un logger
+infra (`JobStoreCMT`, `JobRunShell`, `ErrorLogger`, `SecurityFilter`,
+`QuarkusErrorHandler`, `AbstractResteasyReactiveContext`,
+`ShcConfigurationEventsEmitter`).
+
+### Patrón temporal — pico nocturno **23:00 UTC** todos los días
+
+Distribución por hora UTC (filtrada a horas con >100 errores):
+
+```
+2026-05-08T23  127  ⚠️
+2026-05-09T05  214  ⚠️   ← incidente Quartz/PgBouncer (ya documentado)
+2026-05-09T23  125  ⚠️
+2026-05-10T23  126  ⚠️
+```
+
+El pico de las 23:00 UTC son los **mismos 119 blisters cada noche**
+(intersección 3 noches = 119, casi 1:1). Loggers responsables:
+
+```
+119  PeriodicNotificationGenerator   (NO SE HA ENCONTRADO EL dailyReport ...)
+  4  IntakeReminderNotificationJob   (recordatorio sin toma)
+  4  UserMessageReceiver             (incoming WhatsApp normal, no error)
+```
+
+Es ruido sistemático: un job nocturno itera sobre los blisters
+activos y para 119 de ellos no encuentra `dailyReport SOLICITADO`
+ni `dailyReport PROGRAMADO`. 119 blisters distintos × 2-3 errores
+cada uno = ~250-300 ERROR lines/noche que están siendo emitidos
+sin que indique fallo de servicio al paciente.
+
+### Hallazgo E — dailyReport not-found es ruido crónico de TODOS los blisters activos
+
+Composición de los **437** `PeriodicNotificationGenerator` ERROR:
+
+| variante                                  | hits | blisters distintos |
+|-------------------------------------------|-----:|-------------------:|
+| `dailyReport SOLICITADO not found`        |  329 |       151          |
+| `dailyReport PROGRAMADO not found`        |  108 |       108          |
+
+- 107 blisters reciben **ambos** errores (mismo blister, dos
+  variantes).
+- 152 blisters tienen al menos uno → básicamente todos los
+  blisters activos en producción (recuerda, eran 237 totales,
+  pero los 80-100 con muy poca actividad son demo/desuso).
+- Sólo **1 blister** sale en PROGRAMADO sin SOLICITADO (caso raro,
+  probable race).
+
+**Implicación**: no es una desviación, es el **comportamiento
+habitual del scheduler**. Los blisters legítimos producen estos
+errores cada noche. Dos consecuencias:
+
+1. **Bug filtro alerta `MdCoreNovelErrorBurstPre`**: excluye sólo
+   `dailyReport SOLICITADO` y `PeriodicNotificationGenerator`,
+   pero **no `dailyReport PROGRAMADO`**. Resultado: el wrapper
+   Quartz `ErrorLogger`/`JobRunShell` con `Job
+   ReportNotifications.PATIENT...threw an exception` y los
+   `PROGRAMADO` no excluidos disparan la alerta como "novel" cuando
+   son la misma fuente. Ya disparó 2 veces (10-may 13:05 y 22:05).
+2. **Deuda funcional en md-core**: si todos los blisters activos
+   provocan este error a diario, o el código tiene un orden de
+   inicialización roto (intenta el report **antes** de crearlo) o
+   el log debería ser `INFO`/`DEBUG`, no `ERROR`.
+
+### Hallazgo F — IntakeReminder NotFound concentrado en ~20 blisters "ruidosos"
+
+**95** `IntakeReminderNotificationJob` errors, repartidos en sólo
+**20 blisters distintos**, top-10:
+
+```
+11  72IFY5
+10  KCSI8H
+ 9  99TGJG
+ 8  I8F1I5
+ 8  E4UE5F
+ 8  CB9TUH
+ 7  MFTBP6
+ 7  D61T82
+ 5  8H5XI9
+ 3  NIZXID
+```
+
+Cada error: `No se encuentra la toma para lanzar el recordatorio
+con el trigger Trigger '<BLISTER>.REMINDER.YYYYMMDDHHMM.NN'`.
+Quartz dispara un trigger programado, busca la `INTAKE`
+correspondiente, no la encuentra y lanza ERROR.
+
+Intersección con dailyReport not-found: **10 de 20** también
+sufren los errores del Hallazgo E. La otra mitad (10 blisters)
+sólo tiene este patrón.
+
+**Hipótesis**: blisters cuyo `treatment` fue modificado
+(pausado, replanificado, cancelado) sin limpiar los triggers
+Quartz pre-registrados. El job dispara y la INTAKE ya no existe.
+
+### Hallazgo G — `/shc/event` 5xx — 51 fallos en 96 h, 22 concentrados en un solo burst
+
+| Cuándo | Cuántos | Patrón |
+|---|---:|---|
+| 08-may 17:xx UTC | **22** | burst concentrado |
+| resto (3 días) | ~29 | goteo continuo, ~1/h |
+
+Todos los `Request failed` con `QuarkusErrorHandler` corresponden
+a `/shc/event` (51) salvo 1 a `/user/paciente/1`. Es el endpoint
+donde el SHC físico postea eventos de tomas.
+
+El burst del 8-may 17:xx coincide con la franja horaria de comida
+(19 Madrid) — momento natural de pico de eventos SHC. Pero 22 en
+una hora es **alto** respecto al ~1/h habitual.
+
+**Pendiente**: cruzar SIDs con los SHCEvents anteriores para
+identificar qué tomas/blisters dispararon `IntakeNotFoundException`.
+Necesitaríamos los IDs numéricos de blister del Hallazgo A —
+otra razón para arreglar ese MDC.
+
+### Hallazgo H — `No programming found for device` patrón cíclico
+
+**49** ERRORs distribuidos en sólo **14 devices**, con cadencia
+diaria muy regular:
+
+```
+2026-05-08T15  10   ← cada día a las 15:00 UTC
+2026-05-09T15  10
+2026-05-10T15  10
+2026-05-11T15  10
+```
+
+Los 10 errores por día corresponden a los devices `0000001001`,
+`0000001002`, `0000001005`–`0000001008` (numerados secuencialmente
+y agrupados → muy probablemente **devices demo, no asignados a
+pacientes reales**) más algunos `00000000xx` sueltos.
+
+**No es bug**: el job de envío de programaciones intenta cargar
+configuración para un device que nunca tuvo paciente. Pero la
+señal ERROR de un job que falla 10 veces al día por
+**dispositivos de prueba** corrompe el dashboard. Debería ser
+`WARN` o filtrado.
+
+### Hallazgo I — SecurityFilter: cliente Delphi con token cruzado
+
+**20** errors, todos idénticos:
+```
+Request with X-PHARMACY-ID=E26635037 doesn't match with token
+issued for E60144326.
+```
+
+Concentrados en **11-may 16:50 → 20:43 UTC**, **goteando** (1-2 por
+ventana de 5-30 min). Es decir: hoy mismo, en horario de operación.
+
+**Sospechas**: un cliente Delphi configurado con el token de la
+farmacia E60144326 está enviando peticiones con header
+`X-PHARMACY-ID=E26635037`. Un único cliente mal configurado,
+sostenido en el tiempo. Quizá un farmacéutico cambió de farmacia
+y el binario quedó con creds antiguas.
+
+**Acción**: contactar a operaciones para identificar la farmacia
+E26635037 y revisar su configuración.
+
+### Distribución por dimensión (resumen completo)
+
+| Dimensión | Distintos | Notas |
+|---|---:|---|
+| blister con errores | **162** | de ~237 activos → 68 % afectados |
+| treatment con errores | **148** | top: 9353813(14), 32292(13), 9356089(11) |
+| user con errores | **15** | top: Sergio(20), Francesc(19), Juan(15) |
+| device sin programación | **14** | mayoría demo (0000001xxx) |
+
+**Interpretación**: los errores **no están concentrados en un
+puñado de pacientes**. La mayoría de blisters activos sufre al
+menos un error por sesión (mayormente el ruido nocturno del
+dailyReport). Sólo el patrón IntakeReminder está realmente
+concentrado (20 blisters específicos).
+
+### Estado de las alertas — disparos detectados en 96 h
+
+AM no guarda historial; reconstruyo evaluando condiciones contra Loki:
+
+| Cuándo (UTC) | Alerta | Pico | Causa |
+|---|---|---:|---|
+| 09-may 03:10-03:50 | `MdCoreQuartzErrorAggravationPre` | 0.163 | Incidente PgBouncer/Quartz (documentado en INCIDENTS.md) |
+| 10-may 13:05 | `MdCoreNovelErrorBurstPre` | 0.033 | Falso positivo: dailyReport PROGRAMADO + wrappers Quartz |
+| 10-may 22:05 | `MdCoreNovelErrorBurstPre` | 0.033 | Falso positivo: mismo patrón |
+| 10-may 06:10 | `MdCoreIntakeReminderErrorPre` | 0.013 | Patrón crónico (Hallazgo F) |
+| 11-may 06:10 | `MdCoreIntakeReminderErrorPre` | 0.013 | Patrón crónico (Hallazgo F) |
+
+### Acciones recomendadas
+
+**Corto plazo (alerts tuning)**:
+
+1. **Fix filtro `MdCoreNovelErrorBurstPre`** en
+   `platform/observability/queries/pre/md-core-other-error-rate.yaml`:
+   añadir a la exclusión `!~` los wrappers Quartz que repiten el
+   ruido conocido:
+
+   ```
+   dailyReport PROGRAMADO
+   ReportNotifications
+   MissedIntakeNotifications
+   IntakeNotifications
+   JobRunShell
+   ErrorLogger
+   ```
+
+   Sin esto, la alerta dispara periódicamente por ruido conocido.
+
+2. **Re-calibrar `MdCoreIntakeReminderErrorPre`** o aceptar que es
+   chronic-noise. Hoy dispara a 0.013 req/s (3 errores en 5 min)
+   y eso es el comportamiento normal del sistema porque
+   los 20 blisters con triggers huérfanos producen esto a diario.
+
+**Medio plazo (deuda en md-core)**:
+
+3. **Hallazgo E** — el job que detecta dailyReport no encontrado
+   no debería usar `ERROR` para el caso "no creado todavía".
+   Bajarlo a `INFO`/`DEBUG`.
+
+4. **Hallazgo F** — cuando un treatment se modifica/cancela,
+   limpiar sus triggers Quartz huérfanos (probablemente bug en
+   `NotificationSchedulerService.unschedule(...)`).
+
+5. **Hallazgo H** — devices demo no deberían loggear ERROR cada 6h.
+
+**Investigaciones puntuales**:
+
+6. **Hallazgo G** — burst /shc/event del 8-may 17:xx UTC merece
+   un drill-down con los SIDs específicos.
+
+7. **Hallazgo I** — operaciones debería contactar farmacia
+   E26635037 para reconfigurar.
