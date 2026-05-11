@@ -675,9 +675,28 @@ Composición de los **437** `PeriodicNotificationGenerator` ERROR:
 - Sólo **1 blister** sale en PROGRAMADO sin SOLICITADO (caso raro,
   probable race).
 
-**Implicación**: no es una desviación, es el **comportamiento
-habitual del scheduler**. Los blisters legítimos producen estos
-errores cada noche. Dos consecuencias:
+**El wording del log es engañoso. Tras revisar el código
+(`PeriodicNotificationGenerator.java:67-91, 100-133`)**: el ERROR
+**no significa** "el report no se ha creado todavía". Es la rama
+final de un `forEach` que itera sobre
+`seguimientoRepo.findByTratamientoSeguimientoInforme(...)`, cuya
+query es:
+
+```java
+"activo = true AND tratamiento = ?1 AND seguimientoinforme is true"
+```
+
+El ERROR dispara cuando el blister está activo pero **ningún
+seguimiento (paciente o cuidador) tiene `seguimientoinforme = true`**.
+Es decir, nadie en el círculo de ese paciente ha activado la opción
+de "recibir informe periódico".
+
+Eso es legítimo: muchos pacientes prefieren sólo SHC + reminders y
+no informes; el flag puede ser `false` por defecto. **152 / 237
+blisters ≈ 64 %** están así configurados → **no es un fallo, es la
+configuración mayoritaria del sistema**.
+
+**Implicaciones**:
 
 1. **Bug filtro alerta `MdCoreNovelErrorBurstPre`**: excluye sólo
    `dailyReport SOLICITADO` y `PeriodicNotificationGenerator`,
@@ -686,10 +705,11 @@ errores cada noche. Dos consecuencias:
    ReportNotifications.PATIENT...threw an exception` y los
    `PROGRAMADO` no excluidos disparan la alerta como "novel" cuando
    son la misma fuente. Ya disparó 2 veces (10-may 13:05 y 22:05).
-2. **Deuda funcional en md-core**: si todos los blisters activos
-   provocan este error a diario, o el código tiene un orden de
-   inicialización roto (intenta el report **antes** de crearlo) o
-   el log debería ser `INFO`/`DEBUG`, no `ERROR`.
+2. **Deuda funcional en md-core**: ese `log.errorf` debería ser
+   `log.infof` o `log.debugf` — el caso "no hay suscriptores al
+   informe" no es excepcional. ERROR-level se reserva para fallos
+   reales (token inexistente → ya cubierto en la rama `else` del
+   `ifPresentOrElse`, esa sí legítimamente ERROR).
 
 ### Hallazgo F — IntakeReminder NotFound concentrado en ~20 blisters "ruidosos"
 
@@ -711,16 +731,44 @@ errores cada noche. Dos consecuencias:
 
 Cada error: `No se encuentra la toma para lanzar el recordatorio
 con el trigger Trigger '<BLISTER>.REMINDER.YYYYMMDDHHMM.NN'`.
-Quartz dispara un trigger programado, busca la `INTAKE`
-correspondiente, no la encuentra y lanza ERROR.
+
+**Tras revisar el código (`IntakeReminderNotificationJob.java:35-63`)**:
+
+```java
+ofNullable(tomaRepo.findByBlisterTokenAndTimestamp(token, intake))
+    .filter(t -> !(t.taken || t.missed))
+    .map(t -> { /* envía reminder */ })
+    .orElseGet(() -> { log.errorf("No se encuentra la toma ..."); });
+```
+
+El ERROR mezcla **dos casos distintos** sin distinguirlos:
+
+- **(a) la toma no existe en BD**: `findByBlisterTokenAndTimestamp`
+  devolvió null. Posible fallo real (toma borrada, treatment
+  cancelado dejando trigger huérfano).
+- **(b) la toma existe pero ya está `taken` o `missed`**: el
+  `.filter` la descarta y cae también en `.orElseGet`. Esto pasa
+  cuando **el paciente confirma la toma antes** (vía SHC físico o
+  WhatsApp) de que el reminder dispare. Es **completamente normal**
+  — Quartz dispara religiosamente aunque el reminder ya no haga
+  falta.
+
+Mezclar (a) y (b) bajo el mismo ERROR explica el patrón: los 20
+blisters con más errores no son tratamientos "rotos", son los
+blisters con **pacientes más diligentes confirmando rápido**.
+
+Que sea solo 20 blisters específicos (y no todos los activos)
+sugiere que la mayoría son del caso (b) pero hay sesgo: pacientes
+con muchas tomas/día, o con tratamientos de `maxDelay` corto donde
+la ventana entre toma real y reminder es mayor, son los que más
+generan estos ERRORs benignos.
 
 Intersección con dailyReport not-found: **10 de 20** también
-sufren los errores del Hallazgo E. La otra mitad (10 blisters)
-sólo tiene este patrón.
+sufren los errores del Hallazgo E. Que la mitad solape sugiere
+que no hay correlación de causa raíz, sólo de actividad.
 
-**Hipótesis**: blisters cuyo `treatment` fue modificado
-(pausado, replanificado, cancelado) sin limpiar los triggers
-Quartz pre-registrados. El job dispara y la INTAKE ya no existe.
+**Fix correcto en md-core**: separar las dos ramas del `orElseGet`
+y dejar ERROR sólo para el caso (a).
 
 ### Hallazgo G — `/shc/event` 5xx — 51 fallos en 96 h, 22 concentrados en un solo burst
 
@@ -755,15 +803,45 @@ diaria muy regular:
 ```
 
 Los 10 errores por día corresponden a los devices `0000001001`,
-`0000001002`, `0000001005`–`0000001008` (numerados secuencialmente
-y agrupados → muy probablemente **devices demo, no asignados a
-pacientes reales**) más algunos `00000000xx` sueltos.
+`0000001002`, `0000001005`–`0000001008` y algunos `00000000xx`
+sueltos.
 
-**No es bug**: el job de envío de programaciones intenta cargar
-configuración para un device que nunca tuvo paciente. Pero la
-señal ERROR de un job que falla 10 veces al día por
-**dispositivos de prueba** corrompe el dashboard. Debería ser
-`WARN` o filtrado.
+**Tras revisar el código (`ShcConfigurationEventsEmitter.java:71-91`)**:
+
+```java
+tratamientoRepo.findBySHCDevice(shcID).ifPresentOrElse(t -> {
+    val progs = blisterRepo.findAllByTratamiento(t.id)
+            .stream()
+            .filter(b -> (b.fechaFin.isAfter(LocalDate.now()) || ...)
+                       && b.fechaInicio.isBefore(LocalDate.now().plusDays(3)))
+            .sorted(...)
+            .map(ShcProgramming::calculateProg)
+            .limit(2)
+            .collect(...);
+    if (progs.size() > 0) {
+        sendConfiguration(shcID, progs);
+    } else {
+        log.errorf("No programming found for device %s", shcID);    // ← aquí
+    }
+}, () -> log.errorf("Device %s unknown. No programming sent.", shcID));
+```
+
+El ERROR dispara cuando el device **sí tiene tratamiento asociado**
+(pasa el `ifPresentOrElse`), pero el filtro de "blisters activos en
+±3 días" devuelve 0. Posibles causas legítimas:
+
+- Tratamiento pausado o completado, device sigue asignado.
+- Onboarding inicial — device asignado antes de que existan
+  blisters próximos.
+- Periodo de huelga del tratamiento.
+
+La **otra rama** (`Device unknown. No programming sent.`) SÍ es
+ERROR legítimo — un device hizo handshake pero no está en BD.
+
+Pero la rama que dispara los 49 ERRORs/4 días es **expected** y
+debería ser INFO/WARN. Sólo afecta a 14 devices estables, todos
+con el patrón `0000001001-1008` (rango demo) o `00000000xx`
+sueltos — probablemente tests o devices en limbo.
 
 ### Hallazgo I — SecurityFilter: cliente Delphi con token cruzado
 
@@ -837,17 +915,36 @@ AM no guarda historial; reconstruyo evaluando condiciones contra Loki:
    y eso es el comportamiento normal del sistema porque
    los 20 blisters con triggers huérfanos producen esto a diario.
 
-**Medio plazo (deuda en md-core)**:
+**Medio plazo (deuda en md-core)** — todos verificados leyendo el
+código fuente, no asumidos:
 
-3. **Hallazgo E** — el job que detecta dailyReport no encontrado
-   no debería usar `ERROR` para el caso "no creado todavía".
-   Bajarlo a `INFO`/`DEBUG`.
+3. **Hallazgo E** (`PeriodicNotificationGenerator.java:86, 127`)
+   — bajar `log.errorf` a `log.infof` o `log.debugf` cuando
+   `enviado.get() == false`. El caso "ningún seguimiento con
+   `seguimientoinforme=true`" no es excepcional, es la
+   configuración mayoritaria del sistema.
 
-4. **Hallazgo F** — cuando un treatment se modifica/cancela,
-   limpiar sus triggers Quartz huérfanos (probablemente bug en
-   `NotificationSchedulerService.unschedule(...)`).
+4. **Hallazgo F** (`IntakeReminderNotificationJob.java:35-63`)
+   — separar las dos ramas del `orElseGet`. Hoy mezcla "toma
+   inexistente" (ERROR real) con "toma ya `taken`/`missed`"
+   (no es error, paciente confirmó antes). El reorder sería:
 
-5. **Hallazgo H** — devices demo no deberían loggear ERROR cada 6h.
+   ```java
+   val toma = tomaRepo.findByBlisterTokenAndTimestamp(token, intake);
+   if (toma == null) {
+       log.errorf(...);  // sólo aquí — toma inexistente
+   } else if (toma.taken || toma.missed) {
+       log.debugf("Toma ya confirmada/perdida, reminder no necesario");
+   } else {
+       /* envía reminder */
+   }
+   ```
+
+5. **Hallazgo H** (`ShcConfigurationEventsEmitter.java:86`) —
+   bajar a `log.warnf` o `log.infof` el caso "device tiene
+   tratamiento pero sin blisters en ventana ±3 días". La rama
+   `Device unknown` (línea 90) **sí** mantenerla en ERROR — eso
+   sí es excepcional.
 
 **Investigaciones puntuales**:
 
