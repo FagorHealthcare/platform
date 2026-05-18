@@ -15,6 +15,7 @@ If you are new to the system, read in this order:
 7. **[fhctl-DESIGN.md](fhctl-DESIGN.md)** — proposed CLI to make all of the above scriptable
 8. **[observability-DESIGN.md](observability-DESIGN.md)** — design of the alerting/dashboarding layer on top of Loki (Loki Ruler + Alertmanager + Perses)
 9. **[observability-mcp-DESIGN.md](observability-mcp-DESIGN.md)** — proposed MCP server exposing the observability stack to LLM clients (read-only, runs on platform droplet)
+10. **[observability-AUTH.md](observability-AUTH.md)** — how operators authenticate to the platform (oauth2-proxy + GitHub today; migration plan to Microsoft/Google when Fagor confirms IdP)
 
 ## Cross-references
 

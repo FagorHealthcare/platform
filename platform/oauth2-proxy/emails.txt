@@ -1,0 +1,20 @@
+# oauth2-proxy email allowlist for platform.fmd.fagorhealthcare.com.
+#
+# One verified GitHub email per line. Comments and blank lines OK.
+#
+# To add a user:
+#   1) Append their GitHub-verified email below.
+#   2) Commit + push.
+#   3) On the platform droplet:
+#        cd /opt/platform/stack && git pull
+#        docker compose kill -s HUP oauth2-proxy
+#      The proxy reloads the file without dropping active sessions.
+#
+# To check what email GitHub will send for a user, they can verify at
+# https://github.com/settings/emails (the "primary" address is what
+# oauth2-proxy receives if they grant the `user:email` scope).
+#
+# In addition to this allowlist, oauth2-proxy enforces membership in
+# the FagorHealthcare GitHub org (--github-org flag). Both checks must
+# pass for a session to be created. Defense in depth.
+jorge.uriarte@gailen.es
