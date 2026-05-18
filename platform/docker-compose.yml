@@ -300,8 +300,16 @@ services:
       - --skip-provider-button=true
       # Authentication is gated by GitHub org membership ONLY
       # (--github-org below). No per-email allowlist — see the
-      # comments above the service block. To revert to a per-email
-      # allowlist later, add back:
+      # comments above the service block.
+      #
+      # oauth2-proxy v7 still REQUIRES some form of email validation
+      # to be declared, even when access policy is driven by another
+      # mechanism (org/group membership). `--email-domain=*` is the
+      # canonical "accept any email"; without it the proxy refuses to
+      # start with "missing setting for email validation".
+      - --email-domain=*
+      #
+      # To revert to a per-email allowlist later, add back:
       #   - --authenticated-emails-file=/etc/oauth2-proxy/emails.txt
       # and the matching volume mount.
       # Scopes:
