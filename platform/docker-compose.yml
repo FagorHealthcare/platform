@@ -122,7 +122,6 @@ services:
     env_file: .env
     volumes:
       - ./zot/config.json.tmpl:/in/config.json.tmpl:ro
-      - ./zot/oidc-credentials.json.tmpl:/in/oidc-credentials.json.tmpl:ro
       - zot_rendered:/out
     command:
       - /bin/sh
@@ -130,22 +129,17 @@ services:
       - |
         set -eu
         apk add --no-cache gettext >/dev/null
-        # Main config — no envsubst variables today (accessControl uses
-        # defaultPolicy, see .env.example). Kept through envsubst for
-        # symmetry with the OIDC credentials file and so future template
-        # variables can be added without touching the init container.
+        # OIDC client secret (DEX_ZOT_CLIENT_SECRET) is interpolated
+        # inline into config.json's http.auth.openid.providers.oidc
+        # block by envsubst. Earlier iterations factored the secret
+        # into a separate oidc-credentials.json read via Zot's
+        # `credentialsFile:` field — that field expects a flat
+        # key=value format (not JSON) and the layering added complexity
+        # for no real benefit at single-tenant scale.
         envsubst < /in/config.json.tmpl > /out/config.json
+        # World-readable (the zot image runs as a non-root user).
         chmod 0444 /out/config.json
-        # OIDC client credentials — shared secret between Dex's
-        # staticClient "zot" and this credentialsFile. Read-only to
-        # the zot user (uid 1000 in the upstream image).
-        envsubst < /in/oidc-credentials.json.tmpl > /out/oidc-credentials.json
-        # Same reasoning as config.json: the zot image runs as a
-        # non-root user (uid 1000 in upstream `ghcr.io/project-zot/...`),
-        # so 0400-root-owned is unreadable. World-readable inside the
-        # docker volume is fine.
-        chmod 0444 /out/oidc-credentials.json
-        echo "rendered /out/config.json + /out/oidc-credentials.json"
+        echo "rendered /out/config.json"
     restart: "no"
 
   # -------------------------------------------------------------------
