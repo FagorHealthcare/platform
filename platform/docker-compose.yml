@@ -278,7 +278,12 @@ services:
       - --client-id=${OAUTH2_CLIENT_ID}
       - --client-secret=${OAUTH2_CLIENT_SECRET}
       - --cookie-secret=${OAUTH2_COOKIE_SECRET}
-      - --cookie-domain=.platform.fmd.fagorhealthcare.com
+      # Cookie domain without the leading dot — RFC 6265 superseded the
+      # legacy ".domain.tld" convention. oauth2-proxy v7+ warns loudly
+      # ("request host did not match any of the specific cookie domains")
+      # if you ship the dotted form. Modern browsers still set the cookie
+      # for all subdomains when domain= is given.
+      - --cookie-domain=platform.fmd.fagorhealthcare.com
       - --cookie-secure=true
       - --cookie-samesite=lax
       # Trust requests coming from Caddy on the platform bridge.
@@ -294,11 +299,16 @@ services:
       - --skip-provider-button=true
       # Allowlist source of truth.
       - --authenticated-emails-file=/etc/oauth2-proxy/emails.txt
-      # Scopes: read:user gets the public profile; user:email is
-      # required when the GitHub account has the email set to private
-      # (otherwise the proxy can't read it and the allowlist check
-      # fails with an opaque 403).
-      - --scope=read:user user:email
+      # Scopes:
+      #   read:user — public profile
+      #   user:email — required when the GitHub primary email is
+      #     marked private (otherwise proxy can't read it and the
+      #     allowlist check fails with an opaque 403)
+      #   read:org — REQUIRED when --github-org is set; the proxy
+      #     uses GET /user/orgs to verify membership and that
+      #     endpoint refuses without this scope (returns 403
+      #     "You need at least read:org scope or user scope").
+      - --scope=read:user user:email read:org
       # Restrict to members of the FagorHealthcare org (defense-in-
       # depth on top of the email allowlist). Comment out if you ever
       # need to grant access without org membership.
