@@ -6,27 +6,32 @@
     <title>FMD Platform — Logs (Loki)</title>
     <style>
         body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; color:#222; }
-        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
-        .header { font-size: 24px; margin-top: 10px; }
-        .subheader { color:#666; margin-top: 4px; font-size: 14px; }
+        .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px; }
+        .header { font-size: 22px; margin-top: 4px; }
+        .subheader { color:#666; margin-top: 2px; font-size: 13px; }
 
-        section { margin-top: 20px; }
+        section { margin-top: 16px; }
         section h2 {
-            font-size: 16px; margin-bottom: 8px; color:#333;
-            border-bottom: 2px solid #4CAF50; padding-bottom: 4px;
+            font-size: 14px; margin-bottom: 6px; color:#333;
+            border-bottom: 2px solid #4CAF50; padding-bottom: 3px;
         }
 
+        .topnav { margin-top: 6px; font-size: 13px; }
+        .topnav a { color:#2e7d32; text-decoration: none; margin-right: 12px; }
+        .topnav a:hover { text-decoration: underline; }
+
+        /* ---- query controls ---- */
         .controls {
-            background: white; padding: 12px; border:1px solid #ddd; border-radius:4px;
-            display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px;
+            background: white; padding: 10px; border:1px solid #ddd; border-radius:4px;
+            display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 8px;
             align-items: stretch;
         }
         .controls textarea {
-            grid-column: 1 / 5;
+            grid-column: 1 / 6;
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             font-size: 13px;
             padding: 8px; border:1px solid #ccc; border-radius:3px;
-            resize: vertical; min-height: 60px;
+            resize: vertical; min-height: 54px;
         }
         .controls select, .controls input, .controls button {
             font-size: 13px; padding: 6px 10px; border:1px solid #ccc;
@@ -40,8 +45,13 @@
         .controls button.secondary { background:#9e9e9e; }
         .controls button.secondary:hover { background:#757575; }
 
-        .presets {
-            display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+        .presets, .saved-views {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+            align-items: center;
+        }
+        .presets .label, .saved-views .label {
+            font-size: 11px; color:#666; text-transform: uppercase;
+            letter-spacing: 0.5px; margin-right: 4px;
         }
         .presets button {
             font-size: 12px; padding: 4px 10px;
@@ -49,32 +59,115 @@
             border-radius: 12px; cursor: pointer;
         }
         .presets button:hover { background:#c8e6c9; }
+        .saved-views button.saved {
+            font-size: 12px; padding: 4px 10px;
+            background:#e3f2fd; color:#0d47a1; border:1px solid #90caf9;
+            border-radius: 12px; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        .saved-views button.saved:hover { background:#bbdefb; }
+        .saved-views button.saved .x {
+            color:#0d47a1; font-weight: bold; opacity: 0.6;
+        }
+        .saved-views button.saved .x:hover { opacity: 1; color:#b71c1c; }
+        .saved-views .save-now {
+            font-size: 12px; padding: 4px 10px;
+            background:#fff3e0; color:#e65100; border:1px dashed #ffb74d;
+            border-radius: 12px; cursor: pointer;
+        }
+        .saved-views .save-now:hover { background:#ffe0b2; }
+        .saved-views .empty-hint { font-size: 12px; color:#999; font-style: italic; }
 
+        /* ---- status bar + display toggles ---- */
         .status-bar {
-            margin-top: 12px; font-size: 13px; color:#555;
-            display: flex; justify-content: space-between;
+            margin-top: 10px; font-size: 12px; color:#555;
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 8px;
         }
         .status-bar .err { color:#b71c1c; }
         .status-bar .ok  { color:#1b5e20; }
-
-        #results {
-            background: #1e1e1e; color:#e8e8e8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: 12px; padding: 10px; border-radius: 4px;
-            margin-top: 12px;
-            max-height: 600px; overflow-y: auto;
-            white-space: pre; tab-size: 2;
+        .status-bar label.toggle {
+            font-size: 12px; color:#555; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 4px;
         }
-        #results .ts    { color: #9e9e9e; }
-        #results .lbl   { color: #80cbc4; }
-        #results .line  { color: #fff; }
-        #results .lvl-error { color: #ef9a9a; }
-        #results .lvl-warn  { color: #ffcc80; }
-        #results .lvl-info  { color: #a5d6a7; }
-        #results .empty { color: #9e9e9e; font-style: italic; }
-        #results .err   { color: #ef9a9a; }
+        .status-bar label.toggle input { vertical-align: middle; }
+
+        /* ---- results ---- */
+        #results {
+            background: #1e1e1e; color:#e8e8e8;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px; padding: 6px;
+            border-radius: 4px;
+            margin-top: 8px;
+            max-height: 70vh; overflow-y: auto;
+        }
+        #results .empty, #results .err {
+            padding: 12px;
+            font-style: italic;
+        }
+        #results .empty { color: #9e9e9e; }
+        #results .err   { color: #ef9a9a; white-space: pre-wrap; font-style: normal; }
+
+        .row {
+            display: grid;
+            grid-template-columns: 78px 110px 56px 1fr;
+            gap: 8px;
+            padding: 3px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            align-items: baseline;
+        }
+        .row:hover { background: #2a2a2a; }
+        .row.expanded { background: #2a2a2a; }
+        .row > .ts    { color: #9e9e9e; }
+        .row > .svc   { color: #80cbc4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .row > .lvl   { font-weight: bold; text-align: center;
+                        padding: 0 4px; border-radius: 2px; font-size: 10px;
+                        align-self: center; }
+        .row > .lvl.ERROR { background:#b71c1c; color:white; }
+        .row > .lvl.WARN  { background:#ef6c00; color:white; }
+        .row > .lvl.INFO  { background:#2e7d32; color:white; }
+        .row > .lvl.DEBUG { background:#546e7a; color:white; }
+        .row > .lvl.TRACE { background:#37474f; color:#cfd8dc; }
+        .row > .body  { display: flex; flex-wrap: wrap; gap: 8px;
+                        align-items: baseline; min-width: 0; }
+        .row > .body  > .msg {
+            white-space: pre-wrap; word-break: break-word;
+            flex: 1 1 auto; min-width: 100px;
+            color: #fff;
+        }
+        .row > .body  > .msg.err  { color: #ffcdd2; }
+        .row > .body  > .msg.warn { color: #ffe0b2; }
+        .row > .body  > .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .chip {
+            background: #37474f; color: #cfd8dc;
+            padding: 1px 6px; border-radius: 8px;
+            font-size: 11px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            max-width: 280px;
+        }
+        .chip b { color: #80deea; font-weight: normal; }
+
+        .detail {
+            background: #111;
+            color: #e8e8e8;
+            padding: 8px 12px;
+            margin: 0 6px 4px 6px;
+            border-left: 2px solid #4CAF50;
+            white-space: pre;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .detail .k { color: #80cbc4; }
+        .detail .s { color: #c5e1a5; }
+        .detail .n { color: #ffab91; }
+        .detail .b { color: #ce93d8; }
+        .detail .null { color: #9e9e9e; font-style: italic; }
+        .detail .raw-label { color:#666; font-size: 11px; margin-top: 6px;
+                             padding-top: 6px; border-top: 1px dashed #333; }
 
         .hint {
-            margin-top: 12px; font-size: 12px; color:#666;
+            margin-top: 10px; font-size: 12px; color:#666;
             background: #fff8e1; border:1px solid #ffe082; padding: 8px 12px;
             border-radius: 3px;
         }
@@ -82,16 +175,12 @@
             background: #f4f4f4; padding: 1px 4px; border-radius:2px;
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         }
-
-        .topnav { margin-top: 8px; font-size: 13px; }
-        .topnav a { color:#2e7d32; text-decoration: none; margin-right: 12px; }
-        .topnav a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">📜 FMD Platform — Logs</div>
-    <div class="subheader">Explorador LogQL minimalista sobre Loki 3.x</div>
+    <div class="subheader">Explorador LogQL sobre Loki 3.x</div>
     <div class="topnav">
         <a href="https://platform.fmd.fagorhealthcare.com/">← Volver al portal</a>
         <a href="https://dashboards.platform.fmd.fagorhealthcare.com/">📊 Dashboards</a>
@@ -120,6 +209,7 @@
         </div>
 
         <div class="presets">
+            <span class="label">Presets:</span>
             <button data-q='{service_name="md-core"} |= "ERROR"'>md-core ERROR</button>
             <button data-q='{service_name="md-core"} | json | level="ERROR"'>md-core JSON level=ERROR</button>
             <button data-q='{service_name="md-auth"}'>md-auth todo</button>
@@ -128,28 +218,47 @@
             <button data-q='{service_name="md-core"} | json | phone!=""'>md-core con phone (MDC)</button>
             <button data-q='{service_name="md-core"} | json | blister!=""'>md-core con blister (MDC)</button>
             <button data-q='{namespace="default"} |= "5xx"'>cluster 5xx</button>
+            <button data-q='{cluster="pre", container="md-core"} |~ "IntakeReminderNotificationJob"'>alert: IntakeReminder</button>
+        </div>
+
+        <div class="saved-views" id="saved-views">
+            <span class="label">Vistas guardadas:</span>
+            <button class="save-now" id="save-now">💾 Guardar vista actual</button>
+            <!-- saved buttons injected by JS -->
         </div>
 
         <div class="status-bar">
             <span id="status">Listo.</span>
-            <span id="meta"></span>
+            <span style="display:flex; gap:14px; align-items:center;">
+                <label class="toggle"><input type="checkbox" id="show-all-fields"> Mostrar todos los campos</label>
+                <label class="toggle"><input type="checkbox" id="auto-expand"> Auto-expandir errores</label>
+                <span id="meta"></span>
+            </span>
         </div>
 
-        <pre id="results"><span class="empty">Ejecuta una consulta para ver resultados…</span></pre>
+        <div id="results"><span class="empty">Ejecuta una consulta para ver resultados…</span></div>
 
         <div class="hint">
-            <strong>Notas:</strong>
-            Esta UI consulta <code>/loki/api/v1/query_range</code> con tu sesión OAuth.
-            Para queries complejas o exports usa <code>logcli</code>
-            (<code>logcli --addr=https://logs.platform.fmd.fagorhealthcare.com --auth-header=... query '...'</code>)
-            o conecta un Grafana externo apuntando a esta URL como datasource Loki.
+            <strong>Atajos:</strong>
+            <code>⌘/Ctrl + Enter</code> ejecuta la consulta ·
+            click en una fila la <strong>expande</strong> mostrando el JSON pretty-printed ·
+            click en un chip lo copia al portapapeles.
             <br>
-            <strong>Pista MDC:</strong> los logs de md-core llevan <code>phone</code>, <code>blister</code>, <code>treatment</code>, <code>user</code> como campos top-level JSON, no como labels — usa <code>| json | phone="..."</code>.
+            <strong>Vistas guardadas</strong> se almacenan en <code>localStorage</code> de este navegador
+            (no se sincronizan entre dispositivos).
+            <br>
+            <strong>MDC md-core:</strong> los campos <code>phone</code>, <code>blister</code>,
+            <code>treatment</code>, <code>user</code> son top-level del JSON, no labels — filtra con
+            <code>| json | phone="..."</code>.
         </div>
     </section>
 </div>
 
 <script>
+// =====================================================================
+// Constants
+// =====================================================================
+
 const RANGE_MS = {
     '5m':   5*60*1000,
     '15m':  15*60*1000,
@@ -159,41 +268,211 @@ const RANGE_MS = {
     '7d':   7*24*60*60*1000,
 };
 
+// Fields that are noise in the compact view. Different services dump
+// different keys; keep this list broad enough to cover both
+// ingress-nginx access logs and Quarkus structured logs.
+const NOISE_FIELDS = new Set([
+    'agent', 'user_agent', 'compression', 'referer', 'forwarded',
+    'file', '_entry', 'time', 'timestamp', 'date', '@timestamp',
+    'message', 'level', 'method', 'uri', 'request_uri', 'request',
+    'status', 'http_status', 'bytes_sent', 'body_bytes_sent',
+    'request_time', 'request_length', 'protocol', 'http_version',
+    'tls_version', 'tls_cipher', 'sequenceId', 'loggerClassName',
+    'loggerName', 'thread', 'threadId', 'threadName', 'hostName',
+    'processId', 'processName',
+]);
+
+// Fields that are interesting in the compact view, by service type.
+const INTERESTING_QUARKUS = ['phone', 'blister', 'treatment', 'user', 'exception', 'errorMessage'];
+const INTERESTING_NGINX   = ['client', 'remote_addr', 'host', 'request_id', 'user_id'];
+
+const SAVED_VIEWS_KEY = 'fmd-loki-saved-views-v1';
+const PREFS_KEY       = 'fmd-loki-prefs-v1';
+
 const $ = id => document.getElementById(id);
+
+// =====================================================================
+// Log line parsing + rendering helpers
+// =====================================================================
+
+function tryParseJSON(s) {
+    if (!s || s[0] !== '{') return null;   // cheap reject for non-JSON lines
+    try { return JSON.parse(s); } catch { return null; }
+}
+
+function detectType(obj) {
+    if (!obj) return 'plain';
+    if (obj.level !== undefined && obj.message !== undefined) return 'quarkus';
+    if (obj.method && (obj.request_uri || obj.uri || obj.request)) return 'nginx';
+    return 'unknown';
+}
+
+function shortService(streamLabels) {
+    // Pick the most identifying label, in order of preference.
+    return streamLabels.service_name
+        || streamLabels.container
+        || streamLabels.app
+        || streamLabels.name
+        || streamLabels.job
+        || '?';
+}
+
+function detectLevel(obj, type) {
+    if (type === 'quarkus') return String(obj.level || 'INFO').toUpperCase();
+    if (type === 'nginx') {
+        const s = String(obj.status || obj.http_status || '');
+        if (s.startsWith('5')) return 'ERROR';
+        if (s.startsWith('4')) return 'WARN';
+        return 'INFO';
+    }
+    return '';
+}
+
+function truncate(s, n) {
+    s = String(s);
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+function renderHeadline(obj, type) {
+    if (type === 'quarkus') {
+        const msg = String(obj.message || '');
+        return msg || '(sin message)';
+    }
+    if (type === 'nginx') {
+        const m = obj.method || '?';
+        const uri = obj.request_uri || obj.uri || obj.request || '?';
+        const st = obj.status || obj.http_status || '?';
+        const t = obj.request_time;
+        const b = obj.body_bytes_sent ?? obj.bytes_sent;
+        const meta = [
+            t != null ? `${t}s` : '',
+            b != null ? `${b}B` : '',
+        ].filter(Boolean).join(', ');
+        return `${m} ${uri} → ${st}${meta ? ' (' + meta + ')' : ''}`;
+    }
+    if (type === 'unknown') {
+        const entries = Object.entries(obj).slice(0, 3)
+            .map(([k, v]) => `${k}=${truncate(JSON.stringify(v), 30)}`);
+        return entries.join(' ') || '(json vacío)';
+    }
+    return '';   // plain lines render the raw text instead
+}
+
+function pickChips(obj, type, showAll) {
+    if (!obj) return [];
+    if (showAll) {
+        return Object.entries(obj)
+            .filter(([k, v]) => !NOISE_FIELDS.has(k) && v != null && v !== '')
+            .map(([k, v]) => ({ k, v: truncate(stringify(v), 80) }));
+    }
+    const list = type === 'quarkus' ? INTERESTING_QUARKUS
+               : type === 'nginx'   ? INTERESTING_NGINX
+               : [];
+    return list
+        .filter(k => obj[k] != null && obj[k] !== '')
+        .map(k => ({ k, v: truncate(stringify(obj[k]), 80) }));
+}
+
+function stringify(v) {
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+}
+
+// JSON syntax highlight for the expand panel.
+function highlightJSON(obj) {
+    const json = JSON.stringify(obj, null, 2);
+    return json
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+            m => {
+                let cls = 'n';
+                if (/^"/.test(m)) {
+                    cls = /:$/.test(m) ? 'k' : 's';
+                } else if (/true|false/.test(m)) {
+                    cls = 'b';
+                } else if (/null/.test(m)) {
+                    cls = 'null';
+                }
+                return `<span class="${cls}">${m}</span>`;
+            });
+}
+
+function fmtTs(nsStr) {
+    const ms = Number(nsStr.slice(0, -6));
+    const d = new Date(ms);
+    // HH:MM:SS only (date is implicit in the range selector)
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+}
+
+// =====================================================================
+// Row rendering
+// =====================================================================
+
+let lastRows = [];   // keep parsed rows so expand can re-render
+
+function renderRow(idx, row) {
+    const { ts, streamLabels, raw, parsed, type } = row;
+    const level   = detectLevel(parsed, type);
+    const svc     = shortService(streamLabels);
+    const headline = parsed ? renderHeadline(parsed, type) : raw;
+    const showAll = $('show-all-fields').checked;
+    const chips   = pickChips(parsed, type, showAll);
+
+    const msgCls = level === 'ERROR' ? 'err' : level === 'WARN' ? 'warn' : '';
+
+    const chipsHtml = chips.map(c =>
+        `<span class="chip" data-copy="${escapeHtml(c.k + '=' + c.v)}"><b>${escapeHtml(c.k)}=</b>${escapeHtml(c.v)}</span>`
+    ).join('');
+
+    return `
+        <div class="row" data-idx="${idx}">
+            <span class="ts">${fmtTs(ts)}</span>
+            <span class="svc" title="${escapeHtml(JSON.stringify(streamLabels))}">${escapeHtml(svc)}</span>
+            <span class="lvl ${level}">${level}</span>
+            <span class="body">
+                <span class="msg ${msgCls}">${escapeHtml(headline)}</span>
+                <span class="chips">${chipsHtml}</span>
+            </span>
+        </div>
+    `;
+}
+
+function expandRow(rowEl, idx) {
+    if (rowEl.classList.contains('expanded')) {
+        rowEl.classList.remove('expanded');
+        const next = rowEl.nextElementSibling;
+        if (next && next.classList.contains('detail')) next.remove();
+        return;
+    }
+    rowEl.classList.add('expanded');
+    const row = lastRows[idx];
+    const detail = document.createElement('div');
+    detail.className = 'detail';
+    const parts = [];
+    if (row.parsed) {
+        parts.push(highlightJSON(row.parsed));
+    } else {
+        parts.push(escapeHtml(row.raw));
+    }
+    parts.push(`<div class="raw-label">stream labels:</div>`);
+    parts.push(highlightJSON(row.streamLabels));
+    detail.innerHTML = parts.join('\n');
+    rowEl.insertAdjacentElement('afterend', detail);
+}
+
+// =====================================================================
+// Query execution
+// =====================================================================
 
 function setStatus(text, cls) {
     const el = $('status');
     el.textContent = text;
     el.className = cls || '';
-}
-
-function escapeHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function levelClass(line) {
-    const lc = line.toUpperCase();
-    if (lc.includes('ERROR') || lc.includes('EXCEPTION') || lc.includes('FATAL')) return 'lvl-error';
-    if (lc.includes('WARN'))  return 'lvl-warn';
-    if (lc.includes('INFO'))  return 'lvl-info';
-    return 'line';
-}
-
-function fmtLabels(labels) {
-    // Show only the most useful labels, not every single one
-    const keep = ['service_name','namespace','pod','container','level','host'];
-    const parts = [];
-    for (const k of keep) {
-        if (labels[k]) parts.push(`${k}=${labels[k]}`);
-    }
-    return parts.join(' ');
-}
-
-function fmtTs(nsStr) {
-    // Loki returns timestamps in ns as a string. JS Date wants ms.
-    const ms = Number(nsStr.slice(0, -6));
-    const d = new Date(ms);
-    return d.toISOString().replace('T', ' ').replace('Z', '');
 }
 
 async function runQuery() {
@@ -202,7 +481,7 @@ async function runQuery() {
     const rangeKey = $('range').value;
     const limit = parseInt($('limit').value, 10) || 500;
 
-    const end = Date.now() * 1e6;          // ns
+    const end = Date.now() * 1e6;
     const start = (Date.now() - RANGE_MS[rangeKey]) * 1e6;
 
     const url = `/loki/api/v1/query_range?query=${encodeURIComponent(q)}`
@@ -217,7 +496,7 @@ async function runQuery() {
         if (!r.ok) {
             const body = await r.text();
             setStatus(`HTTP ${r.status}`, 'err');
-            $('results').innerHTML = `<span class="err">${escapeHtml(body.slice(0, 4000))}</span>`;
+            $('results').innerHTML = `<div class="err">${escapeHtml(body.slice(0, 4000))}</div>`;
             return;
         }
         const data = await r.json();
@@ -225,51 +504,215 @@ async function runQuery() {
 
         const streams = (data.data && data.data.result) || [];
         if (streams.length === 0) {
-            $('results').innerHTML = '<span class="empty">Sin resultados en el rango.</span>';
+            $('results').innerHTML = '<div class="empty">Sin resultados en el rango.</div>';
             setStatus('OK', 'ok');
             $('meta').textContent = `${ms} ms · 0 líneas`;
+            lastRows = [];
             return;
         }
 
         // Flatten + sort by ts desc, keep top N
         const rows = [];
         for (const s of streams) {
-            const labelStr = fmtLabels(s.stream || {});
-            for (const [ts, line] of s.values) {
-                rows.push({ ts, labelStr, line });
+            const labels = s.stream || {};
+            for (const [ts, raw] of s.values) {
+                const parsed = tryParseJSON(raw);
+                const type   = detectType(parsed);
+                rows.push({ ts, streamLabels: labels, raw, parsed, type });
             }
         }
         rows.sort((a, b) => (a.ts < b.ts ? 1 : -1));
         const shown = rows.slice(0, limit);
+        lastRows = shown;
 
-        const html = shown.map(r => {
-            const lvl = levelClass(r.line);
-            return `<span class="ts">${fmtTs(r.ts)}</span> `
-                 + `<span class="lbl">{${escapeHtml(r.labelStr)}}</span>  `
-                 + `<span class="${lvl}">${escapeHtml(r.line)}</span>`;
-        }).join('\n');
-
+        const html = shown.map((r, idx) => renderRow(idx, r)).join('');
         $('results').innerHTML = html;
+
+        // Auto-expand errors if enabled
+        if ($('auto-expand').checked) {
+            document.querySelectorAll('#results .row').forEach((el, idx) => {
+                if ((lastRows[idx]?.parsed?.level || '').toUpperCase() === 'ERROR') {
+                    expandRow(el, idx);
+                }
+            });
+        }
+
         setStatus('OK', 'ok');
         $('meta').textContent = `${ms} ms · ${rows.length} líneas (mostradas ${shown.length})`;
     } catch (e) {
         setStatus('Error de red', 'err');
-        $('results').innerHTML = `<span class="err">${escapeHtml(String(e))}</span>`;
+        $('results').innerHTML = `<div class="err">${escapeHtml(String(e))}</div>`;
     }
 }
 
+// =====================================================================
+// Saved views (localStorage)
+// =====================================================================
+
+function loadSavedViews() {
+    try {
+        const raw = localStorage.getItem(SAVED_VIEWS_KEY);
+        if (!raw) return [];
+        return JSON.parse(raw);
+    } catch { return []; }
+}
+
+function persistSavedViews(views) {
+    localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views));
+}
+
+function renderSavedViews() {
+    const container = $('saved-views');
+    // Remove existing saved buttons (keep label + save-now)
+    container.querySelectorAll('button.saved, .empty-hint').forEach(b => b.remove());
+
+    const views = loadSavedViews();
+    if (views.length === 0) {
+        const hint = document.createElement('span');
+        hint.className = 'empty-hint';
+        hint.textContent = '(ninguna)';
+        container.appendChild(hint);
+        return;
+    }
+    for (const v of views) {
+        const btn = document.createElement('button');
+        btn.className = 'saved';
+        btn.title = `${v.query}\nRango: ${v.range} · Límite: ${v.limit}`;
+        btn.innerHTML = `${escapeHtml(v.name)} <span class="x" title="Borrar">×</span>`;
+        btn.addEventListener('click', e => {
+            if (e.target.classList.contains('x')) {
+                e.stopPropagation();
+                if (confirm(`¿Borrar la vista "${v.name}"?`)) {
+                    const next = loadSavedViews().filter(x => x.id !== v.id);
+                    persistSavedViews(next);
+                    renderSavedViews();
+                }
+                return;
+            }
+            applyView(v);
+        });
+        container.appendChild(btn);
+    }
+}
+
+function applyView(v) {
+    $('query').value = v.query;
+    $('range').value = v.range;
+    $('limit').value = v.limit;
+    $('show-all-fields').checked = !!v.showAll;
+    $('auto-expand').checked = !!v.autoExpand;
+    persistPrefs();
+    runQuery();
+}
+
+function saveCurrentView() {
+    const name = prompt('Nombre para esta vista:');
+    if (!name || !name.trim()) return;
+    const view = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: name.trim(),
+        query: $('query').value,
+        range: $('range').value,
+        limit: parseInt($('limit').value, 10) || 500,
+        showAll: $('show-all-fields').checked,
+        autoExpand: $('auto-expand').checked,
+    };
+    const views = loadSavedViews();
+    views.push(view);
+    persistSavedViews(views);
+    renderSavedViews();
+}
+
+// =====================================================================
+// Preferences (display toggles) — restored on load
+// =====================================================================
+
+function loadPrefs() {
+    try {
+        const raw = localStorage.getItem(PREFS_KEY);
+        if (!raw) return {};
+        return JSON.parse(raw);
+    } catch { return {}; }
+}
+
+function persistPrefs() {
+    const prefs = {
+        showAll: $('show-all-fields').checked,
+        autoExpand: $('auto-expand').checked,
+        range: $('range').value,
+        limit: $('limit').value,
+    };
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+}
+
+function applyPrefs() {
+    const p = loadPrefs();
+    if (p.showAll != null)    $('show-all-fields').checked = p.showAll;
+    if (p.autoExpand != null) $('auto-expand').checked = p.autoExpand;
+    if (p.range)              $('range').value = p.range;
+    if (p.limit)              $('limit').value = p.limit;
+}
+
+// =====================================================================
+// Wiring
+// =====================================================================
+
+function reRenderRowsKeepingExpanded() {
+    // When the user flips "show all fields", we want to re-render in
+    // place without re-fetching from Loki. Lose expanded state — too
+    // hairy to preserve and the cost of a click is low.
+    if (lastRows.length === 0) return;
+    const html = lastRows.map((r, idx) => renderRow(idx, r)).join('');
+    $('results').innerHTML = html;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    applyPrefs();
+    renderSavedViews();
+
     $('run').addEventListener('click', runQuery);
     $('query').addEventListener('keydown', e => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault(); runQuery();
         }
     });
+
     document.querySelectorAll('.presets button').forEach(b => {
         b.addEventListener('click', () => {
             $('query').value = b.dataset.q;
             runQuery();
         });
+    });
+
+    $('save-now').addEventListener('click', saveCurrentView);
+
+    $('show-all-fields').addEventListener('change', () => {
+        persistPrefs();
+        reRenderRowsKeepingExpanded();
+    });
+    $('auto-expand').addEventListener('change', persistPrefs);
+    $('range').addEventListener('change', persistPrefs);
+    $('limit').addEventListener('change', persistPrefs);
+
+    // Delegated click handling on results:
+    //  - click on a chip → copy to clipboard
+    //  - click anywhere else on a row → expand / collapse
+    $('results').addEventListener('click', e => {
+        const chip = e.target.closest('.chip');
+        if (chip) {
+            navigator.clipboard.writeText(chip.dataset.copy || chip.textContent).then(() => {
+                const orig = chip.style.background;
+                chip.style.background = '#4CAF50';
+                setTimeout(() => chip.style.background = orig, 350);
+            }).catch(() => {});
+            e.stopPropagation();
+            return;
+        }
+        const row = e.target.closest('.row');
+        if (row) {
+            const idx = Number(row.dataset.idx);
+            expandRow(row, idx);
+        }
     });
 });
 </script>
