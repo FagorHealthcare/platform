@@ -140,7 +140,11 @@ services:
         # staticClient "zot" and this credentialsFile. Read-only to
         # the zot user (uid 1000 in the upstream image).
         envsubst < /in/oidc-credentials.json.tmpl > /out/oidc-credentials.json
-        chmod 0400 /out/oidc-credentials.json
+        # Same reasoning as config.json: the zot image runs as a
+        # non-root user (uid 1000 in upstream `ghcr.io/project-zot/...`),
+        # so 0400-root-owned is unreadable. World-readable inside the
+        # docker volume is fine.
+        chmod 0444 /out/oidc-credentials.json
         echo "rendered /out/config.json + /out/oidc-credentials.json"
     restart: "no"
 
