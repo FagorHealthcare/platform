@@ -51,23 +51,20 @@
         }
     }
 
-    # Everything else is gated EXCEPT the public probes. The matcher
-    # below intentionally excludes /healthz so external uptime monitors
-    # can probe without OAuth. Any host that imports this snippet gets
-    # the same /healthz exemption for free.
-    #
-    # Using the explicit block form `@needs_auth { not path /healthz }`
-    # — Caddy's one-line `@m not path X` shortcut adapts to an empty
-    # matcher in v2.10, so forward_auth ends up applying everywhere.
-    @needs_auth {
-        not path /healthz
-    }
-    forward_auth @needs_auth oauth2-proxy:4180 {
+    # Catch-all gate. Every request that didn't match /oauth2/* must
+    # have a valid session cookie or it gets bounced to login. The
+    # vhosts that need a public exception (e.g. apex /healthz) declare
+    # an explicit `handle /healthz { ... }` BEFORE importing this
+    # snippet AND wrap their own forward_auth with a matcher (see the
+    # apex vhost below). Named matchers don't survive being defined
+    # inside a snippet and referenced from the importing site, so we
+    # keep the snippet plain.
+    forward_auth oauth2-proxy:4180 {
         uri /oauth2/auth
         copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
 
-        # 401 → kick the browser into the login flow. Without this users
-        # see a raw 401 page instead of the GitHub OAuth screen.
+        # 401 → kick the browser into the login flow. Without this
+        # users see a raw 401 page instead of the GitHub OAuth screen.
         @unauth status 401
         handle_response @unauth {
             redir * /oauth2/start?rd={scheme}://{host}{uri}
@@ -91,7 +88,39 @@
 # The /oauth2/* paths are public so the login flow can complete.
 # ---------------------------------------------------------------------
 platform.fmd.fagorhealthcare.com {
-    import oauth2_gate
+    # --- /oauth2/* is public so the login flow can run ---
+    handle /oauth2/* {
+        reverse_proxy oauth2-proxy:4180 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Uri {uri}
+        }
+    }
+
+    # --- Public uptime probe — exempt from auth via the matcher
+    # in the forward_auth below. External monitors hit /healthz
+    # without credentials. ---
+    handle /healthz {
+        respond "ok" 200
+    }
+
+    # --- Auth gate. Inline (not via the oauth2_gate snippet) so the
+    # named matcher actually applies — snippets don't propagate their
+    # named matchers to the importing site in Caddy v2. We exempt
+    # /healthz so the probe above stays public, and /oauth2/* so the
+    # login flow itself isn't gated. ---
+    @auth_required {
+        not path /healthz
+        not path /oauth2/*
+    }
+    forward_auth @auth_required oauth2-proxy:4180 {
+        uri /oauth2/auth
+        copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
+
+        @unauth status 401
+        handle_response @unauth {
+            redir * /oauth2/start?rd={scheme}://{host}{uri}
+        }
+    }
 
     # --- Cluster health proxies ---
     # The k8s ingress-health rule exposes /health/<svc> on
@@ -136,13 +165,6 @@ platform.fmd.fagorhealthcare.com {
         reverse_proxy alertmanager:9093 {
             rewrite /api/v2/alerts?active=true&silenced=false&inhibited=false
         }
-    }
-
-    # --- Public uptime probe (intentionally outside oauth2_gate via
-    # ordering: /healthz matches before the gate's catch-all).
-    # External uptime monitors call this without OAuth credentials. ---
-    handle /healthz {
-        respond "ok" 200
     }
 
     # --- Landing page (static) ---
