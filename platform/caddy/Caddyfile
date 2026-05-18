@@ -88,89 +88,87 @@
 # The /oauth2/* paths are public so the login flow can complete.
 # ---------------------------------------------------------------------
 platform.fmd.fagorhealthcare.com {
-    # --- /oauth2/* is public so the login flow can run ---
-    handle /oauth2/* {
-        reverse_proxy oauth2-proxy:4180 {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Uri {uri}
+    # Caddy's default directive ordering puts `forward_auth` ahead of
+    # `handle`, which means a catch-all forward_auth would intercept
+    # /healthz and /oauth2/* before their handlers had a chance.
+    # Named matchers (`forward_auth @x`) silently produced empty
+    # matchers in v2.10 — couldn't make them work either.
+    #
+    # `route` blocks bypass directive ordering and execute everything
+    # inside in strict declaration order. Public paths are declared
+    # first, the auth gate sits in the middle, and authenticated paths
+    # come after — so /healthz and /oauth2/* never reach forward_auth.
+    route {
+        # --- Public probe ---
+        handle /healthz {
+            respond "ok" 200
         }
-    }
 
-    # --- Public uptime probe — exempt from auth via the matcher
-    # in the forward_auth below. External monitors hit /healthz
-    # without credentials. ---
-    handle /healthz {
-        respond "ok" 200
-    }
+        # --- Login flow (must be public) ---
+        handle /oauth2/* {
+            reverse_proxy oauth2-proxy:4180 {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Uri {uri}
+            }
+        }
 
-    # --- Auth gate. Inline (not via the oauth2_gate snippet) so the
-    # named matcher actually applies — snippets don't propagate their
-    # named matchers to the importing site in Caddy v2. We exempt
-    # /healthz so the probe above stays public, and /oauth2/* so the
-    # login flow itself isn't gated. ---
-    @auth_required {
-        not path /healthz
-        not path /oauth2/*
-    }
-    forward_auth @auth_required oauth2-proxy:4180 {
-        uri /oauth2/auth
-        copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
+        # --- Everything below requires a valid session ---
+        forward_auth oauth2-proxy:4180 {
+            uri /oauth2/auth
+            copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
 
-        @unauth status 401
-        handle_response @unauth {
-            redir * /oauth2/start?rd={scheme}://{host}{uri}
+            @unauth status 401
+            handle_response @unauth {
+                redir * /oauth2/start?rd={scheme}://{host}{uri}
+            }
         }
-    }
 
-    # --- Cluster health proxies ---
-    # The k8s ingress-health rule exposes /health/<svc> on
-    # fmd.fagorhealthcare.com — that's the existing public endpoint
-    # consumed by md-resi-front's status.html. We proxy to the same
-    # surface (same source of truth) instead of duplicating health
-    # logic here.
-    handle /api/cluster/health/* {
-        uri strip_prefix /api/cluster
-        reverse_proxy https://fmd.fagorhealthcare.com {
-            header_up Host fmd.fagorhealthcare.com
+        # --- Cluster health proxies ---
+        # The k8s ingress-health rule exposes /health/<svc> on
+        # fmd.fagorhealthcare.com — same source of truth that
+        # md-resi-front's status.html already uses. We proxy through
+        # Caddy to keep everything same-origin (no CORS).
+        handle /api/cluster/health/* {
+            uri strip_prefix /api/cluster
+            reverse_proxy https://fmd.fagorhealthcare.com {
+                header_up Host fmd.fagorhealthcare.com
+            }
         }
-    }
 
-    # --- Platform health proxies (this droplet) ---
-    # Each backend exposes a readiness endpoint we can probe cheaply.
-    handle /api/platform/health/loki {
-        reverse_proxy loki:3100 {
-            rewrite /ready
+        # --- Platform health proxies (this droplet) ---
+        handle /api/platform/health/loki {
+            reverse_proxy loki:3100 {
+                rewrite /ready
+            }
         }
-    }
-    handle /api/platform/health/alertmanager {
-        reverse_proxy alertmanager:9093 {
-            rewrite /-/ready
+        handle /api/platform/health/alertmanager {
+            reverse_proxy alertmanager:9093 {
+                rewrite /-/ready
+            }
         }
-    }
-    handle /api/platform/health/perses {
-        # Perses doesn't ship a dedicated /ready endpoint, but its
-        # root returns 200 once provisioning has loaded.
-        reverse_proxy perses:8080 {
-            rewrite /api/v1/projects
+        handle /api/platform/health/perses {
+            reverse_proxy perses:8080 {
+                rewrite /api/v1/projects
+            }
         }
-    }
-    handle /api/platform/health/zot {
-        reverse_proxy zot:5000 {
-            rewrite /v2/
+        handle /api/platform/health/zot {
+            reverse_proxy zot:5000 {
+                rewrite /v2/
+            }
         }
-    }
 
-    # --- Active alerts ---
-    handle /api/am/active {
-        reverse_proxy alertmanager:9093 {
-            rewrite /api/v2/alerts?active=true&silenced=false&inhibited=false
+        # --- Active alerts ---
+        handle /api/am/active {
+            reverse_proxy alertmanager:9093 {
+                rewrite /api/v2/alerts?active=true&silenced=false&inhibited=false
+            }
         }
-    }
 
-    # --- Landing page (static) ---
-    handle {
-        root * /srv/landing
-        file_server
+        # --- Landing page (static) ---
+        handle {
+            root * /srv/landing
+            file_server
+        }
     }
 
     encode gzip
