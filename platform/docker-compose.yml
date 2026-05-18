@@ -246,8 +246,16 @@ services:
     volumes:
       - dex_rendered:/etc/dex:ro
       - dex_data:/var/dex
+    # Skip the image's docker-entrypoint (which runs `gomplate` to expand
+    # env vars in the config before exec'ing dex). gomplate insists on
+    # being able to walk *into* /etc/dex as if it were a template dir
+    # rather than a single file, and the rendered file is owned root:root
+    # in our setup — gomplate then aborts with "permission denied". We
+    # don't need gomplate's expansion anyway: the dex-config-render init
+    # container already does envsubst upstream. So we exec the dex
+    # binary directly with the already-rendered file.
+    entrypoint: ["/usr/local/bin/dex"]
     command:
-      - dex
       - serve
       - /etc/dex/config.yaml
     networks:
