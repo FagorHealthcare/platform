@@ -55,7 +55,13 @@
     # below intentionally excludes /healthz so external uptime monitors
     # can probe without OAuth. Any host that imports this snippet gets
     # the same /healthz exemption for free.
-    @needs_auth not path /healthz
+    #
+    # Using the explicit block form `@needs_auth { not path /healthz }`
+    # — Caddy's one-line `@m not path X` shortcut adapts to an empty
+    # matcher in v2.10, so forward_auth ends up applying everywhere.
+    @needs_auth {
+        not path /healthz
+    }
     forward_auth @needs_auth oauth2-proxy:4180 {
         uri /oauth2/auth
         copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
