@@ -21,11 +21,145 @@
     #   - admin API on :2019 (internal, used by healthcheck)
 }
 
+# =====================================================================
+# Snippets: auth gate via oauth2-proxy
+# =====================================================================
+#
+# `oauth2_gate` is invoked from the operator-facing vhosts to require
+# a valid GitHub session. It does two things:
+#
+#   1. Exposes /oauth2/* (start, callback, sign_in, sign_out) on the
+#      vhost by reverse-proxying to oauth2-proxy:4180. Without this
+#      the login flow doesn't work end-to-end.
+#
+#   2. Gates everything else via forward_auth → /oauth2/auth. On 200
+#      Caddy proceeds; on 401 it redirects the browser to /oauth2/start
+#      (which then redirects to GitHub).
+#
+# Cookie scope is `.platform.fmd.fagorhealthcare.com` so a single login
+# covers the apex AND every subdomain (logs, alerts, dashboards). SSO.
+#
+# Usage at the top of any vhost:
+#     import oauth2_gate
+# ---------------------------------------------------------------------
+(oauth2_gate) {
+    # Public endpoints used by the login flow itself.
+    handle /oauth2/* {
+        reverse_proxy oauth2-proxy:4180 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Uri {uri}
+        }
+    }
+
+    # Everything else is gated.
+    forward_auth oauth2-proxy:4180 {
+        uri /oauth2/auth
+        copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
+
+        # 401 → kick the browser into the login flow. Without this users
+        # see a raw 401 page instead of the GitHub OAuth screen.
+        @unauth status 401
+        handle_response @unauth {
+            redir * /oauth2/start?rd={scheme}://{host}{uri}
+        }
+    }
+}
+
+# ---------------------------------------------------------------------
+# platform.fmd.fagorhealthcare.com → Portal (apex)
+#
+# Single entrypoint for operators. Serves a static landing page that
+# polls health endpoints of:
+#   - the cluster (md-core/md-auth/md-resi-back/md-resi-front) via
+#     /api/cluster/health/<svc>, which Caddy proxies to the cluster's
+#     own ingress-health (no auth there — it's already public).
+#   - the platform services (loki/alertmanager/perses/zot) via
+#     /api/platform/health/<svc>, resolved locally on this droplet.
+#   - Alertmanager active alerts via /api/am/active.
+#
+# All gated behind oauth2-proxy via the `oauth2_gate` snippet above.
+# The /oauth2/* paths are public so the login flow can complete.
+# ---------------------------------------------------------------------
+platform.fmd.fagorhealthcare.com {
+    import oauth2_gate
+
+    # --- Cluster health proxies ---
+    # The k8s ingress-health rule exposes /health/<svc> on
+    # fmd.fagorhealthcare.com — that's the existing public endpoint
+    # consumed by md-resi-front's status.html. We proxy to the same
+    # surface (same source of truth) instead of duplicating health
+    # logic here.
+    handle /api/cluster/health/* {
+        uri strip_prefix /api/cluster
+        reverse_proxy https://fmd.fagorhealthcare.com {
+            header_up Host fmd.fagorhealthcare.com
+        }
+    }
+
+    # --- Platform health proxies (this droplet) ---
+    # Each backend exposes a readiness endpoint we can probe cheaply.
+    handle /api/platform/health/loki {
+        reverse_proxy loki:3100 {
+            rewrite /ready
+        }
+    }
+    handle /api/platform/health/alertmanager {
+        reverse_proxy alertmanager:9093 {
+            rewrite /-/ready
+        }
+    }
+    handle /api/platform/health/perses {
+        # Perses doesn't ship a dedicated /ready endpoint, but its
+        # root returns 200 once provisioning has loaded.
+        reverse_proxy perses:8080 {
+            rewrite /api/v1/projects
+        }
+    }
+    handle /api/platform/health/zot {
+        reverse_proxy zot:5000 {
+            rewrite /v2/
+        }
+    }
+
+    # --- Active alerts ---
+    handle /api/am/active {
+        reverse_proxy alertmanager:9093 {
+            rewrite /api/v2/alerts?active=true&silenced=false&inhibited=false
+        }
+    }
+
+    # --- Public uptime probe (intentionally outside oauth2_gate via
+    # ordering: /healthz matches before the gate's catch-all).
+    # External uptime monitors call this without OAuth credentials. ---
+    handle /healthz {
+        respond "ok" 200
+    }
+
+    # --- Landing page (static) ---
+    handle {
+        root * /srv/landing
+        file_server
+    }
+
+    encode gzip
+
+    log {
+        output stdout
+        format json
+    }
+}
+
 # ---------------------------------------------------------------------
 # registry.platform.fmd.fagorhealthcare.com → Zot
 #
-# OCI clients (docker, oras, crane) require the original Host header
-# to pass through unchanged so Zot can issue correct redirects/links.
+# NOTE: Zot stays on its OWN basic_auth (configured in zot/config.json),
+# not on oauth2-proxy. OCI clients (docker, oras, crane) speak HTTP
+# basic auth via WWW-Authenticate negotiation; they don't follow the
+# browser OAuth dance. Forcing oauth2-proxy here would break every
+# `docker pull` from the cluster nodes.
+#
+# OCI clients also require the original Host header to pass through
+# unchanged so Zot can issue correct redirects/links.
 # ---------------------------------------------------------------------
 registry.platform.fmd.fagorhealthcare.com {
     reverse_proxy zot:5000 {
@@ -54,11 +188,25 @@ registry.platform.fmd.fagorhealthcare.com {
 # Cleartext is in /root/platform-credentials.txt on the droplet.
 # ---------------------------------------------------------------------
 logs.platform.fmd.fagorhealthcare.com {
-    basic_auth {
-        {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
+    # ---------- vector push path: keep basic_auth ----------
+    # Vector running in the k8s cluster pushes log batches to
+    # /loki/api/v1/push. It speaks HTTP basic auth, NOT OAuth2.
+    # Treating this path specially lets human operators use OAuth
+    # for the rest (LogQL queries, labels API, the Grafana-style
+    # UI) without breaking the ingest pipeline.
+    @vector_push path /loki/api/v1/push
+    handle @vector_push {
+        basic_auth {
+            {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
+        }
+        reverse_proxy loki:3100
     }
 
-    reverse_proxy loki:3100
+    # ---------- everything else: operator-facing, OAuth gated ----------
+    handle {
+        import oauth2_gate
+        reverse_proxy loki:3100
+    }
 
     encode gzip
 
@@ -74,9 +222,7 @@ logs.platform.fmd.fagorhealthcare.com {
 # operator-facing only.
 # ---------------------------------------------------------------------
 alerts.platform.fmd.fagorhealthcare.com {
-    basic_auth {
-        {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
-    }
+    import oauth2_gate
 
     reverse_proxy alertmanager:9093
 
@@ -94,9 +240,7 @@ alerts.platform.fmd.fagorhealthcare.com {
 # disabled (single-user view); the gate is at the edge.
 # ---------------------------------------------------------------------
 dashboards.platform.fmd.fagorhealthcare.com {
-    basic_auth {
-        {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
-    }
+    import oauth2_gate
 
     reverse_proxy perses:8080
 

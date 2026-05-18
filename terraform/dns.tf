@@ -12,14 +12,21 @@
 # populated zone would risk wiping unrelated records.
 #
 # Records produced (all type A, all → reserved IP):
+#   platform.fmd.fagorhealthcare.com                 (Portal apex — unified
+#                                                     health view: cluster
+#                                                     services + platform
+#                                                     services + alerts)
 #   registry.platform.fmd.fagorhealthcare.com
 #   logs.platform.fmd.fagorhealthcare.com
-#   alerts.platform.fmd.fagorhealthcare.com         (Alertmanager UI)
-#   dashboards.platform.fmd.fagorhealthcare.com     (Perses)
+#   alerts.platform.fmd.fagorhealthcare.com          (Alertmanager UI)
+#   dashboards.platform.fmd.fagorhealthcare.com      (Perses)
 # =====================================================================
 
 locals {
   dns_records = {
+    # Apex of the platform subdomain — landing page for operators.
+    # Authenticated via oauth2-proxy + GitHub (see Caddyfile).
+    apex       = var.subdomain_label
     registry   = "registry.${var.subdomain_label}"
     logs       = "logs.${var.subdomain_label}"
     alerts     = "alerts.${var.subdomain_label}"

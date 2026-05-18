@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FMD Platform — Estado y Observabilidad</title>
+    <style>
+        /* Heredado del estilo de md-resi-front/src/status.html para
+           mantener continuidad visual con el resto de FMD. */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            color: #222;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            font-size: 26px;
+            margin-top: 20px;
+        }
+
+        .subheader {
+            text-align: center;
+            color: #666;
+            margin-top: 6px;
+        }
+
+        .alert-banner {
+            margin: 20px auto;
+            padding: 14px 18px;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: 500;
+        }
+        .alert-banner.ok      { background:#e8f5e9; color:#1b5e20; border:1px solid #a5d6a7; }
+        .alert-banner.firing  { background:#ffebee; color:#b71c1c; border:1px solid #ef9a9a; }
+        .alert-banner.unknown { background:#fff3e0; color:#bf360c; border:1px solid #ffcc80; }
+
+        section { margin-top: 30px; }
+        section h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 4px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+        }
+        th, td {
+            text-align: left;
+            border: 1px solid #ddd;
+            padding: 8px 10px;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            font-weight: 500;
+        }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        td.status, th.status { text-align: center; width: 90px; }
+        td.version { color: #555; font-family: monospace; font-size: 13px; }
+        td.deploy  { color: #555; font-size: 13px; }
+        td.link a  { color: #2e7d32; text-decoration: none; }
+        td.link a:hover { text-decoration: underline; }
+
+        .status-icon {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            text-align: center;
+            line-height: 20px;
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .status-icon.up      { background-color: #4CAF50; }
+        .status-icon.down    { background-color: #d32f2f; }
+        .status-icon.unknown { background-color: #9e9e9e; }
+
+        .quick-links {
+            margin-top: 30px;
+            text-align: center;
+        }
+        .quick-links a {
+            display: inline-block;
+            margin: 0 8px;
+            padding: 10px 16px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .quick-links a:hover { background: #43a047; }
+
+        #last-updated {
+            text-align: center;
+            margin-top: 24px;
+            color: #777;
+            font-size: 13px;
+        }
+        #refresh-button {
+            display: block;
+            margin: 12px auto 0;
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #refresh-button:hover { background-color: #43a047; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">FMD Platform</div>
+    <div class="subheader">Salud del sistema · Logs · Alertas · Dashboards</div>
+
+    <div id="alert-banner" class="alert-banner unknown">
+        Comprobando alertas…
+    </div>
+
+    <section>
+        <h2>Servicios del cluster (pre)</h2>
+        <table id="cluster-table">
+            <thead>
+            <tr>
+                <th>Servicio</th>
+                <th>Versión</th>
+                <th>Despliegue</th>
+                <th class="status">Estado</th>
+            </tr>
+            </thead>
+            <tbody>
+            <!-- Filas inyectadas por JS para mantener un solo lugar
+                 con la definición de servicios. -->
+            </tbody>
+        </table>
+    </section>
+
+    <section>
+        <h2>Plataforma de observabilidad (droplet)</h2>
+        <table id="platform-table">
+            <thead>
+            <tr>
+                <th>Servicio</th>
+                <th>Enlace</th>
+                <th>Función</th>
+                <th class="status">Estado</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </section>
+
+    <div class="quick-links">
+        <a href="https://dashboards.platform.fmd.fagorhealthcare.com/">📊 Dashboards</a>
+        <a href="https://logs.platform.fmd.fagorhealthcare.com/">📜 Logs</a>
+        <a href="https://alerts.platform.fmd.fagorhealthcare.com/">🚨 Alertmanager</a>
+    </div>
+
+    <button id="refresh-button">Refrescar</button>
+    <div id="last-updated"></div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------
+// Definición de servicios. Mantener en orden de criticidad operativa.
+// Los healthchecks se hacen a través de Caddy (mismo origen) para evitar
+// CORS:
+//   /api/cluster/health/<svc>  → proxy al ingress-health del cluster
+//   /api/platform/health/<svc> → resuelto en el propio droplet
+//   /api/am/active             → alertas firing actuales (AM v2 API)
+// ---------------------------------------------------------------------
+const CLUSTER_SERVICES = [
+    { id: 'md-auth',       label: 'Usuarios y autenticación' },
+    { id: 'md-core',       label: 'Adherencia y notificaciones' },
+    { id: 'md-resi-back',  label: 'Sincronización con FMD' },
+    { id: 'md-resi-front', label: 'Acceso Web' },
+];
+
+const PLATFORM_SERVICES = [
+    { id: 'loki',         label: 'Loki',         purpose: 'Almacenamiento de logs',
+      url: 'https://logs.platform.fmd.fagorhealthcare.com/' },
+    { id: 'alertmanager', label: 'Alertmanager', purpose: 'Enrutado de alertas a Slack',
+      url: 'https://alerts.platform.fmd.fagorhealthcare.com/' },
+    { id: 'perses',       label: 'Perses',       purpose: 'Dashboards',
+      url: 'https://dashboards.platform.fmd.fagorhealthcare.com/' },
+    { id: 'zot',          label: 'Zot',          purpose: 'Registro OCI privado',
+      url: 'https://registry.platform.fmd.fagorhealthcare.com/' },
+];
+
+function iconHTML(state) {
+    const map = { up: '✓', down: '✗', unknown: '?' };
+    return `<span class="status-icon ${state}">${map[state] || '?'}</span>`;
+}
+
+function renderRow(tbody, cols) {
+    const tr = document.createElement('tr');
+    cols.forEach(c => {
+        const td = document.createElement('td');
+        if (c.html) td.innerHTML = c.html; else td.textContent = c.text || '';
+        if (c.cls) td.className = c.cls;
+        tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+}
+
+function buildSkeleton() {
+    const ct = document.querySelector('#cluster-table tbody');
+    ct.innerHTML = '';
+    CLUSTER_SERVICES.forEach(s => {
+        renderRow(ct, [
+            { text: s.label },
+            { text: '—', cls: 'version' },
+            { text: '—', cls: 'deploy' },
+            { html: iconHTML('unknown'), cls: 'status' },
+        ]);
+    });
+
+    const pt = document.querySelector('#platform-table tbody');
+    pt.innerHTML = '';
+    PLATFORM_SERVICES.forEach(s => {
+        renderRow(pt, [
+            { text: s.label },
+            { html: `<a href="${s.url}">${s.url.replace('https://','').replace(/\/$/,'')}</a>`, cls: 'link' },
+            { text: s.purpose },
+            { html: iconHTML('unknown'), cls: 'status' },
+        ]);
+    });
+}
+
+async function refresh() {
+    document.getElementById('last-updated').textContent = 'Actualizando…';
+    buildSkeleton();
+
+    // --- Cluster: pull /health/<svc> via Caddy proxy ---
+    await Promise.all(CLUSTER_SERVICES.map(async (svc, idx) => {
+        const row = document.querySelectorAll('#cluster-table tbody tr')[idx];
+        try {
+            const r = await fetch(`/api/cluster/health/${svc.id}`, { cache: 'no-store' });
+            const data = await r.json();
+            const state = (data.status === 'UP') ? 'up' : 'down';
+            const info  = (data.checks || []).find(c => c.name === 'Application info');
+            const version   = info?.data?.version || '?';
+            const startTime = info?.data?.startTime
+                ? new Date(info.data.startTime).toLocaleString()
+                : '—';
+            row.children[1].textContent = version;
+            row.children[2].textContent = startTime;
+            row.children[3].innerHTML   = iconHTML(state);
+        } catch (e) {
+            row.children[3].innerHTML = iconHTML('down');
+        }
+    }));
+
+    // --- Platform: each container exposes its own readiness endpoint.
+    // Caddy proxies them under /api/platform/health/<id>. The proxy
+    // returns 200 if the backend is reachable, anything else → down. ---
+    await Promise.all(PLATFORM_SERVICES.map(async (svc, idx) => {
+        const row = document.querySelectorAll('#platform-table tbody tr')[idx];
+        try {
+            const r = await fetch(`/api/platform/health/${svc.id}`, { cache: 'no-store' });
+            row.children[3].innerHTML = iconHTML(r.ok ? 'up' : 'down');
+        } catch (e) {
+            row.children[3].innerHTML = iconHTML('down');
+        }
+    }));
+
+    // --- Alerts banner ---
+    const banner = document.getElementById('alert-banner');
+    try {
+        const r = await fetch('/api/am/active', { cache: 'no-store' });
+        const alerts = await r.json();
+        if (Array.isArray(alerts) && alerts.length === 0) {
+            banner.className = 'alert-banner ok';
+            banner.textContent = '✓ No hay alertas firing ahora mismo.';
+        } else {
+            banner.className = 'alert-banner firing';
+            const names = alerts.map(a => a.labels?.alertname || '?').slice(0, 5);
+            banner.textContent = `🚨 ${alerts.length} alerta(s) firing: ${names.join(', ')}`;
+        }
+    } catch (e) {
+        banner.className = 'alert-banner unknown';
+        banner.textContent = 'No se pudo consultar Alertmanager.';
+    }
+
+    document.getElementById('last-updated').textContent =
+        'Última actualización: ' + new Date().toLocaleString();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    buildSkeleton();
+    refresh();
+    document.getElementById('refresh-button').addEventListener('click', e => {
+        e.preventDefault();
+        refresh();
+    });
+    // Auto-refresh cada 60s. Suficiente para humanos, no abusa de los
+    // backends — los healthchecks de Quarkus son baratos pero no gratis.
+    setInterval(refresh, 60_000);
+});
+</script>
+</body>
+</html>

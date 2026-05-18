@@ -51,6 +51,10 @@ services:
       - "443:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Static landing page for the apex vhost. Mount read-only — Caddy
+      # only serves these files, never writes them. The path matches
+      # `root * /srv/landing` in the Caddyfile.
+      - ./landing:/srv/landing:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -66,6 +70,8 @@ services:
       alertmanager:
         condition: service_healthy
       perses:
+        condition: service_started
+      oauth2-proxy:
         condition: service_started
     healthcheck:
       # Caddy's admin API listens on 127.0.0.1:2019 (IPv4-only) inside the
@@ -231,3 +237,80 @@ services:
     # No healthcheck: the persesdev image is minimal (no wget/curl) and
     # the binary doesn't expose a healthcheck subcommand. End-to-end
     # health is observed via Caddy / browser hits to dashboards.platform.
+
+  # -------------------------------------------------------------------
+  # oauth2-proxy — authentication gateway in front of all operator-
+  # facing vhosts (logs/alerts/dashboards + the platform apex).
+  #
+  # Provider: GitHub. The OAuth App "FMD Platform Observability" is
+  # registered under the FagorHealthcare GitHub organization; Client
+  # ID/Secret are stored in /root/platform-credentials.txt on the
+  # droplet and exported into .env at cloud-init time.
+  #
+  # Access policy: explicit email allowlist (./oauth2-proxy/emails.txt),
+  # one address per line. To add an operator, append a line and run
+  #   docker compose kill -s HUP oauth2-proxy
+  # The container reloads the file without losing in-flight sessions.
+  #
+  # Cookie scope: .platform.fmd.fagorhealthcare.com — a single login
+  # at the apex grants access to every subdomain (SSO).
+  #
+  # Why GitHub (and not Microsoft/Google):
+  # Fagor Healthcare's corporate IdP isn't confirmed yet. GitHub is
+  # an interim choice because every operator (gailen/fagorhealthcare/
+  # externos) already has an account, MFA is inherited from GitHub,
+  # and switching providers is a 3-flag change on this container — no
+  # other piece of the stack touches identity.
+  # See docs/observability-AUTH.md for the migration plan.
+  # -------------------------------------------------------------------
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "4180"
+    volumes:
+      # Email allowlist — mounted read-only so a HUP reload reads the
+      # latest disk contents.
+      - ./oauth2-proxy/emails.txt:/etc/oauth2-proxy/emails.txt:ro
+    command:
+      - --provider=github
+      - --client-id=${OAUTH2_CLIENT_ID}
+      - --client-secret=${OAUTH2_CLIENT_SECRET}
+      - --cookie-secret=${OAUTH2_COOKIE_SECRET}
+      - --cookie-domain=.platform.fmd.fagorhealthcare.com
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      # Trust requests coming from Caddy on the platform bridge.
+      - --reverse-proxy=true
+      - --whitelist-domain=.platform.fmd.fagorhealthcare.com
+      - --redirect-url=https://platform.fmd.fagorhealthcare.com/oauth2/callback
+      # Bind on every interface inside the container so Caddy can reach
+      # us as oauth2-proxy:4180 from the bridge network.
+      - --http-address=0.0.0.0:4180
+      # Tell oauth2-proxy these requests came in via HTTPS so its
+      # generated redirects use https:// not http://.
+      - --force-https=false
+      - --skip-provider-button=true
+      # Allowlist source of truth.
+      - --authenticated-emails-file=/etc/oauth2-proxy/emails.txt
+      # Scopes: read:user gets the public profile; user:email is
+      # required when the GitHub account has the email set to private
+      # (otherwise the proxy can't read it and the allowlist check
+      # fails with an opaque 403).
+      - --scope=read:user user:email
+      # Restrict to members of the FagorHealthcare org (defense-in-
+      # depth on top of the email allowlist). Comment out if you ever
+      # need to grant access without org membership.
+      - --github-org=FagorHealthcare
+      # Pass user identity downstream so Caddy can forward it to apps
+      # that want to know who's logged in (no-op for our current set,
+      # ready for the future MCP server).
+      - --set-xauthrequest=true
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      # Don't extend the session forever — re-auth weekly.
+      - --cookie-expire=168h
+      - --cookie-refresh=60m
+    networks:
+      - platform
