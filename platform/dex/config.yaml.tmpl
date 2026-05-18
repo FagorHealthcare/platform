@@ -94,7 +94,11 @@ staticClients:
   - id: zot
     name: Zot Registry
     redirectURIs:
-      - https://registry.platform.fmd.fagorhealthcare.com/auth/callback/oidc
+      # Zot generates this exact callback at startup (see its log line
+      # `redirectURI=`). The `/zot/` prefix is hard-coded in Zot v2.1.x
+      # and is independent of the provider name under
+      # http.auth.openid.providers.<name>.
+      - https://registry.platform.fmd.fagorhealthcare.com/zot/auth/callback/oidc
     secret: $DEX_ZOT_CLIENT_SECRET
 
 # Enforce that all signed claims expire — refresh token lifetime caps
