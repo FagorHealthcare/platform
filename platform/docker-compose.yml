@@ -210,7 +210,13 @@ services:
         set -eu
         apk add --no-cache gettext >/dev/null
         envsubst < /in/config.yaml.tmpl > /out/config.yaml
-        chmod 0400 /out/config.yaml
+        # World-readable: the dexidp/dex image runs the process as a
+        # non-root user, so a 0400-owned-by-root file is unreadable.
+        # The file does contain secrets, but it lives inside a docker
+        # named volume — exposure surface is the same as the .env file
+        # already mounted from /opt/platform/.env, which is also visible
+        # to anyone with docker-socket access on the host.
+        chmod 0444 /out/config.yaml
         echo "rendered /out/config.yaml"
     restart: "no"
 
