@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FMD Platform — Logs (Loki)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; color:#222; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { font-size: 24px; margin-top: 10px; }
+        .subheader { color:#666; margin-top: 4px; font-size: 14px; }
+
+        section { margin-top: 20px; }
+        section h2 {
+            font-size: 16px; margin-bottom: 8px; color:#333;
+            border-bottom: 2px solid #4CAF50; padding-bottom: 4px;
+        }
+
+        .controls {
+            background: white; padding: 12px; border:1px solid #ddd; border-radius:4px;
+            display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px;
+            align-items: stretch;
+        }
+        .controls textarea {
+            grid-column: 1 / 5;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 13px;
+            padding: 8px; border:1px solid #ccc; border-radius:3px;
+            resize: vertical; min-height: 60px;
+        }
+        .controls select, .controls input, .controls button {
+            font-size: 13px; padding: 6px 10px; border:1px solid #ccc;
+            border-radius: 3px; background: white;
+        }
+        .controls button {
+            background:#4CAF50; color:white; border:none; cursor: pointer;
+            font-weight: 500;
+        }
+        .controls button:hover { background:#43a047; }
+        .controls button.secondary { background:#9e9e9e; }
+        .controls button.secondary:hover { background:#757575; }
+
+        .presets {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+        }
+        .presets button {
+            font-size: 12px; padding: 4px 10px;
+            background:#e8f5e9; color:#1b5e20; border:1px solid #a5d6a7;
+            border-radius: 12px; cursor: pointer;
+        }
+        .presets button:hover { background:#c8e6c9; }
+
+        .status-bar {
+            margin-top: 12px; font-size: 13px; color:#555;
+            display: flex; justify-content: space-between;
+        }
+        .status-bar .err { color:#b71c1c; }
+        .status-bar .ok  { color:#1b5e20; }
+
+        #results {
+            background: #1e1e1e; color:#e8e8e8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px; padding: 10px; border-radius: 4px;
+            margin-top: 12px;
+            max-height: 600px; overflow-y: auto;
+            white-space: pre; tab-size: 2;
+        }
+        #results .ts    { color: #9e9e9e; }
+        #results .lbl   { color: #80cbc4; }
+        #results .line  { color: #fff; }
+        #results .lvl-error { color: #ef9a9a; }
+        #results .lvl-warn  { color: #ffcc80; }
+        #results .lvl-info  { color: #a5d6a7; }
+        #results .empty { color: #9e9e9e; font-style: italic; }
+        #results .err   { color: #ef9a9a; }
+
+        .hint {
+            margin-top: 12px; font-size: 12px; color:#666;
+            background: #fff8e1; border:1px solid #ffe082; padding: 8px 12px;
+            border-radius: 3px;
+        }
+        .hint code {
+            background: #f4f4f4; padding: 1px 4px; border-radius:2px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+
+        .topnav { margin-top: 8px; font-size: 13px; }
+        .topnav a { color:#2e7d32; text-decoration: none; margin-right: 12px; }
+        .topnav a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">📜 FMD Platform — Logs</div>
+    <div class="subheader">Explorador LogQL minimalista sobre Loki 3.x</div>
+    <div class="topnav">
+        <a href="https://platform.fmd.fagorhealthcare.com/">← Volver al portal</a>
+        <a href="https://dashboards.platform.fmd.fagorhealthcare.com/">📊 Dashboards</a>
+        <a href="https://alerts.platform.fmd.fagorhealthcare.com/">🚨 Alertmanager</a>
+    </div>
+
+    <section>
+        <h2>Consulta</h2>
+        <div class="controls">
+            <textarea id="query" placeholder='{service_name=~".+"} |= ""'>{service_name=~".+"}</textarea>
+
+            <label style="font-size:12px; color:#555; align-self:center;">Rango:</label>
+            <select id="range">
+                <option value="5m">Últimos 5 min</option>
+                <option value="15m" selected>Últimos 15 min</option>
+                <option value="1h">Última hora</option>
+                <option value="6h">Últimas 6 horas</option>
+                <option value="24h">Últimas 24 horas</option>
+                <option value="7d">Últimos 7 días</option>
+            </select>
+
+            <label style="font-size:12px; color:#555; align-self:center;">Límite:</label>
+            <input id="limit" type="number" value="500" min="10" max="5000" style="width:80px;">
+
+            <button id="run">Buscar</button>
+        </div>
+
+        <div class="presets">
+            <button data-q='{service_name="md-core"} |= "ERROR"'>md-core ERROR</button>
+            <button data-q='{service_name="md-core"} | json | level="ERROR"'>md-core JSON level=ERROR</button>
+            <button data-q='{service_name="md-auth"}'>md-auth todo</button>
+            <button data-q='{service_name="md-resi-back"}'>md-resi-back todo</button>
+            <button data-q='{service_name=~".+"} |= "Exception"'>cualquier Exception</button>
+            <button data-q='{service_name="md-core"} | json | phone!=""'>md-core con phone (MDC)</button>
+            <button data-q='{service_name="md-core"} | json | blister!=""'>md-core con blister (MDC)</button>
+            <button data-q='{namespace="default"} |= "5xx"'>cluster 5xx</button>
+        </div>
+
+        <div class="status-bar">
+            <span id="status">Listo.</span>
+            <span id="meta"></span>
+        </div>
+
+        <pre id="results"><span class="empty">Ejecuta una consulta para ver resultados…</span></pre>
+
+        <div class="hint">
+            <strong>Notas:</strong>
+            Esta UI consulta <code>/loki/api/v1/query_range</code> con tu sesión OAuth.
+            Para queries complejas o exports usa <code>logcli</code>
+            (<code>logcli --addr=https://logs.platform.fmd.fagorhealthcare.com --auth-header=... query '...'</code>)
+            o conecta un Grafana externo apuntando a esta URL como datasource Loki.
+            <br>
+            <strong>Pista MDC:</strong> los logs de md-core llevan <code>phone</code>, <code>blister</code>, <code>treatment</code>, <code>user</code> como campos top-level JSON, no como labels — usa <code>| json | phone="..."</code>.
+        </div>
+    </section>
+</div>
+
+<script>
+const RANGE_MS = {
+    '5m':   5*60*1000,
+    '15m':  15*60*1000,
+    '1h':   60*60*1000,
+    '6h':   6*60*60*1000,
+    '24h':  24*60*60*1000,
+    '7d':   7*24*60*60*1000,
+};
+
+const $ = id => document.getElementById(id);
+
+function setStatus(text, cls) {
+    const el = $('status');
+    el.textContent = text;
+    el.className = cls || '';
+}
+
+function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function levelClass(line) {
+    const lc = line.toUpperCase();
+    if (lc.includes('ERROR') || lc.includes('EXCEPTION') || lc.includes('FATAL')) return 'lvl-error';
+    if (lc.includes('WARN'))  return 'lvl-warn';
+    if (lc.includes('INFO'))  return 'lvl-info';
+    return 'line';
+}
+
+function fmtLabels(labels) {
+    // Show only the most useful labels, not every single one
+    const keep = ['service_name','namespace','pod','container','level','host'];
+    const parts = [];
+    for (const k of keep) {
+        if (labels[k]) parts.push(`${k}=${labels[k]}`);
+    }
+    return parts.join(' ');
+}
+
+function fmtTs(nsStr) {
+    // Loki returns timestamps in ns as a string. JS Date wants ms.
+    const ms = Number(nsStr.slice(0, -6));
+    const d = new Date(ms);
+    return d.toISOString().replace('T', ' ').replace('Z', '');
+}
+
+async function runQuery() {
+    const q = $('query').value.trim();
+    if (!q) { setStatus('Consulta vacía.', 'err'); return; }
+    const rangeKey = $('range').value;
+    const limit = parseInt($('limit').value, 10) || 500;
+
+    const end = Date.now() * 1e6;          // ns
+    const start = (Date.now() - RANGE_MS[rangeKey]) * 1e6;
+
+    const url = `/loki/api/v1/query_range?query=${encodeURIComponent(q)}`
+        + `&start=${start}&end=${end}&limit=${limit}&direction=BACKWARD`;
+
+    setStatus('Consultando…');
+    $('meta').textContent = '';
+    const t0 = performance.now();
+
+    try {
+        const r = await fetch(url, { cache: 'no-store' });
+        if (!r.ok) {
+            const body = await r.text();
+            setStatus(`HTTP ${r.status}`, 'err');
+            $('results').innerHTML = `<span class="err">${escapeHtml(body.slice(0, 4000))}</span>`;
+            return;
+        }
+        const data = await r.json();
+        const ms = Math.round(performance.now() - t0);
+
+        const streams = (data.data && data.data.result) || [];
+        if (streams.length === 0) {
+            $('results').innerHTML = '<span class="empty">Sin resultados en el rango.</span>';
+            setStatus('OK', 'ok');
+            $('meta').textContent = `${ms} ms · 0 líneas`;
+            return;
+        }
+
+        // Flatten + sort by ts desc, keep top N
+        const rows = [];
+        for (const s of streams) {
+            const labelStr = fmtLabels(s.stream || {});
+            for (const [ts, line] of s.values) {
+                rows.push({ ts, labelStr, line });
+            }
+        }
+        rows.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+        const shown = rows.slice(0, limit);
+
+        const html = shown.map(r => {
+            const lvl = levelClass(r.line);
+            return `<span class="ts">${fmtTs(r.ts)}</span> `
+                 + `<span class="lbl">{${escapeHtml(r.labelStr)}}</span>  `
+                 + `<span class="${lvl}">${escapeHtml(r.line)}</span>`;
+        }).join('\n');
+
+        $('results').innerHTML = html;
+        setStatus('OK', 'ok');
+        $('meta').textContent = `${ms} ms · ${rows.length} líneas (mostradas ${shown.length})`;
+    } catch (e) {
+        setStatus('Error de red', 'err');
+        $('results').innerHTML = `<span class="err">${escapeHtml(String(e))}</span>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    $('run').addEventListener('click', runQuery);
+    $('query').addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault(); runQuery();
+        }
+    });
+    document.querySelectorAll('.presets button').forEach(b => {
+        b.addEventListener('click', () => {
+            $('query').value = b.dataset.q;
+            runQuery();
+        });
+    });
+});
+</script>
+</body>
+</html>

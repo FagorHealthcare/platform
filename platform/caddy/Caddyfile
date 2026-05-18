@@ -151,9 +151,23 @@ platform.fmd.fagorhealthcare.com {
                 rewrite /api/v1/projects
             }
         }
+        # Zot's /v2/ is the OCI auth challenge endpoint: it answers
+        # 401 + `WWW-Authenticate: Basic realm=...` when it's alive,
+        # which the browser interprets as a credential prompt — that
+        # was the "basic auth popup" the user kept seeing on the
+        # portal. We don't want to authenticate here (the portal is
+        # only checking liveness, not pulling images); we just want
+        # to know whether Zot is responding at all. So we intercept
+        # the upstream 401 and reply with a clean 200 — no auth
+        # headers reach the browser. Any other status (5xx, timeout)
+        # falls through and gets reported as "down".
         handle /api/platform/health/zot {
             reverse_proxy zot:5000 {
                 rewrite /v2/
+                @zot_alive status 401
+                handle_response @zot_alive {
+                    respond "" 200
+                }
             }
         }
 
@@ -218,23 +232,56 @@ registry.platform.fmd.fagorhealthcare.com {
 # Cleartext is in /root/platform-credentials.txt on the droplet.
 # ---------------------------------------------------------------------
 logs.platform.fmd.fagorhealthcare.com {
-    # ---------- vector push path: keep basic_auth ----------
-    # Vector running in the k8s cluster pushes log batches to
-    # /loki/api/v1/push. It speaks HTTP basic auth, NOT OAuth2.
-    # Treating this path specially lets human operators use OAuth
-    # for the rest (LogQL queries, labels API, the Grafana-style
-    # UI) without breaking the ingest pipeline.
-    @vector_push path /loki/api/v1/push
-    handle @vector_push {
-        basic_auth {
-            {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
+    # Caddy's default directive ordering doesn't preserve the order
+    # we want here (vector_push BEFORE the OAuth gate, landing
+    # BEFORE the catch-all proxy to Loki). `route` forces strict
+    # declaration order — same pattern as the apex vhost.
+    route {
+        # ----- Vector push: basic_auth, no OAuth -----
+        # Vector running in the k8s cluster pushes log batches to
+        # /loki/api/v1/push. It speaks HTTP basic auth, NOT OAuth2.
+        # Treating this path specially lets human operators use
+        # OAuth for the rest without breaking the ingest pipeline.
+        @vector_push path /loki/api/v1/push
+        handle @vector_push {
+            basic_auth {
+                {$LOKI_AUTH_USER} {$LOKI_AUTH_HASH}
+            }
+            reverse_proxy loki:3100
         }
-        reverse_proxy loki:3100
-    }
 
-    # ---------- everything else: operator-facing, OAuth gated ----------
-    handle {
-        import oauth2_gate
+        # ----- OAuth /oauth2/* endpoints (public) -----
+        handle /oauth2/* {
+            reverse_proxy oauth2-proxy:4180 {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Uri {uri}
+            }
+        }
+
+        # ----- Auth gate for everything below -----
+        forward_auth oauth2-proxy:4180 {
+            uri /oauth2/auth
+            copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
+
+            @unauth status 401
+            handle_response @unauth {
+                redir * /oauth2/start?rd={scheme}://{host}{uri}
+            }
+        }
+
+        # ----- Landing page at / (replaces Loki's native 404) -----
+        # Loki 3.x doesn't ship a web UI; hitting `/` returns 404.
+        # Operators clicking "📜 Logs" from the portal landed on a
+        # bare 404 with no idea what to do next. We serve a small
+        # LogQL explorer here that runs queries client-side against
+        # Loki's /loki/api/v1/* endpoints (same origin, OAuth cookie
+        # already valid). Everything else still proxies to Loki.
+        handle / {
+            root * /srv/loki-landing
+            file_server
+        }
+
+        # ----- Everything else → Loki API -----
         reverse_proxy loki:3100
     }
 

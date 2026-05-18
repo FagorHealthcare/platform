@@ -55,6 +55,10 @@ services:
       # only serves these files, never writes them. The path matches
       # `root * /srv/landing` in the Caddyfile.
       - ./landing:/srv/landing:ro
+      # Loki has no built-in UI; serving a minimal LogQL explorer
+      # at logs.platform.../ replaces the bare 404 that operators
+      # hit when clicking through from the portal.
+      - ./loki-landing:/srv/loki-landing:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
