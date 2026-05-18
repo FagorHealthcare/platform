@@ -6,9 +6,16 @@
 #   1) Append their GitHub-verified email below.
 #   2) Commit + push.
 #   3) On the platform droplet:
-#        cd /opt/platform/stack && git pull
-#        docker compose kill -s HUP oauth2-proxy
-#      The proxy reloads the file without dropping active sessions.
+#        cd /opt/platform/stack && git pull --ff-only
+#      oauth2-proxy is already watching this file via fsnotify
+#      (see startup log "watching ... for updates") and reloads
+#      automatically within a second. No restart, no SIGHUP needed.
+#      Active sessions are NOT affected.
+#
+# DO NOT use `docker compose kill -s HUP oauth2-proxy`. oauth2-proxy
+# v7+ treats SIGHUP as a graceful shutdown signal, not a reload —
+# the container will exit and you'll need `docker compose up -d`
+# to bring it back. Watcher is the only supported reload mechanism.
 #
 # To check what email GitHub will send for a user, they can verify at
 # https://github.com/settings/emails (the "primary" address is what

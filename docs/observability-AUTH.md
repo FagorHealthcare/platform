@@ -109,19 +109,26 @@ Tres pasos. Tarda ~30 segundos:
    el `--github-org` flag bloquea su sesión incluso con el email en
    la allowlist.
 
-3. **Recargar el proxy** en el droplet. No es un restart, es un
-   `SIGHUP` — no rompe sesiones activas:
+3. **Traer el nuevo `emails.txt`** al droplet. oauth2-proxy ya tiene
+   un watcher de fsnotify activo sobre el fichero (lo dice en su log
+   de arranque: `watching '/etc/oauth2-proxy/emails.txt' for updates`)
+   y recarga automáticamente en cuanto el fichero cambia en disco.
+   No hace falta restart ni señal:
 
    ```bash
    ssh root@platform.fmd.fagorhealthcare.com
    cd /opt/platform/stack
    git pull --ff-only
-   docker compose kill -s HUP oauth2-proxy
    ```
 
-   El primero (`git pull`) trae el nuevo `emails.txt` al droplet (el
-   stack live se sirve desde el repo clonado en cloud-init); el
-   segundo le dice a oauth2-proxy "relee el archivo".
+   Las sesiones activas NO se ven afectadas.
+
+   > **NO uses `docker compose kill -s HUP oauth2-proxy`.** oauth2-proxy
+   > v7+ trata SIGHUP como shutdown graceful, no como reload. El
+   > container termina y hay que volver a levantarlo con
+   > `docker compose up -d oauth2-proxy`. El watcher de fsnotify es el
+   > único mecanismo soportado de recarga. (Aprendido en el despliegue
+   > inicial 2026-05-18.)
 
 ## Cómo quitar un operador
 
