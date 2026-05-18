@@ -3,7 +3,8 @@
 Status: **deployed since 2026-05-07 — service CI/CD cutover pending** (verified 2026-05-18) | Estimated savings: **~$0/mo** (gains scanning + ends hardcoded creds) | Effort: **~1 day** | Risk: **medium** | Depends on: **[06-platform-tier.md](06-platform-tier.md)** (registry runs on the platform droplet)
 
 Current state (verified):
-- Zot `v2.1.16-fhpatch` runs on `md-platform` droplet at `registry.platform.fmd.fagorhealthcare.com`. CVE scanning active, basic_auth via htpasswd. Local disk + nightly rclone mirror to Spaces.
+- Zot `v2.1.16-fhpatch` runs on `md-platform` droplet at `registry.platform.fmd.fagorhealthcare.com`. CVE scanning active. Local disk + nightly rclone mirror to Spaces.
+- **Auth (pending merge of `feature/zot-oidc-dex`):** browser users via Dex/GitHub OIDC, OCI clients via per-user API keys. Replaces the original htpasswd `ci`/`cluster` static accounts. See [Authentication design](#authentication-design).
 - `md-backup` already pushes to Zot.
 - **Service CI/CD (md-core, md-auth, md-pwa, md-resi-back, md-resi-front) still pushes to DockerHub `gailen/*`.** `add_tag.sh` in each repo's `.github/workflows/` still carries the hardcoded `gailen:873e27e5-…` credential — the deuda de seguridad listed in CLAUDE.md persists until this cutover lands.
 
@@ -164,6 +165,62 @@ CRITICAL" gate in `release.yml`.
 
 The platform droplet hosting cost is accounted in pillar 06, not here,
 to avoid double-counting.
+
+## Authentication design
+
+Initially (2026-05-07 → 2026-05-18) the registry ran with **htpasswd**
+basic auth for both humans and CI: two static accounts (`ci`, `cluster`)
+in `platform/zot/htpasswd`, rendered by cloud-init. That kept things
+running but inherited the same smell we're trying to fix elsewhere —
+shared, long-lived secrets baked on the host.
+
+The new design, landed in `feature/zot-oidc-dex` (PR pending), splits
+auth by **client type**:
+
+| Client | Mechanism | Auth source |
+|---|---|---|
+| Browser (human operators) | OIDC (Authorization Code) | Dex → GitHub org membership + team slugs |
+| OCI clients (docker / oras / kubelet / CI) | HTTP basic auth | Per-user API keys minted from Zot's UI |
+
+Why both, briefly: OCI clients speak HTTP basic via WWW-Authenticate;
+they don't follow OAuth redirects. Forcing OIDC there breaks every
+`docker pull` and every kubelet image pull on every cluster node. Zot
+supports both at once (`http.auth.openid` + `http.auth.apikey`), and
+API keys are user-scoped — a leaked key only grants whatever the
+issuing user's `groups` claim would have granted them, and revocation
+is one click in the UI.
+
+### Components
+
+- **Dex** (`dexidp/dex:v2.41.1`) runs on the platform droplet as a new
+  service in the compose stack, fronted by Caddy at
+  `dex.platform.fmd.fagorhealthcare.com`.
+- A **separate GitHub OAuth App "FMD Dex"** (distinct from the existing
+  "FMD Platform Observability" used by oauth2-proxy). Same callback
+  pattern; distinct credentials.
+- **`accessControl` policies in Zot** match on group strings of the form
+  `FagorHealthcare:<team-slug>`. Two operator-supplied team slugs in
+  `.env` (`ZOT_RW_GROUP`, `ZOT_RO_GROUP`) select read+write vs read-only.
+
+Full runbook (registering the OAuth app, generating first API keys,
+debugging): [`../observability-AUTH.md`](../observability-AUTH.md),
+section *Zot authentication*.
+
+### What is NOT yet done
+
+The 5 services pushing images (`md-core`, `md-auth`, `md-pwa`,
+`md-resi-back`, `md-resi-front`) still use DockerHub through their
+`add_tag.sh`. The Zot+API-key cutover requires:
+
+1. Generate one CI API key per service (or one shared "ci-services" key).
+2. Replace the hardcoded DockerHub credential in each repo's
+   `add_tag.sh` with a Zot HTTP basic auth call.
+3. Update each repo's `cd.yaml` to `docker push` to Zot.
+4. Regenerate the cluster pull secret to point at Zot with the API key.
+
+These are **per-service follow-up PRs** in the respective repos. Until
+those land, this pillar stays in "auth done, CI/CD cutover pending"
+state — same posture as before, but now the registry side is ready.
 
 ## Bootstrap image — pin the Zot image off-DockerHub
 

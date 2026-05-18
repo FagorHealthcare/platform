@@ -51,11 +51,15 @@ Excepciones intencionadas que **no** pasan por oauth2-proxy:
    `platform-credentials.txt`.
 2. **`registry.platform...` (Zot)** — los clientes Docker/OCI hablan
    HTTP basic via WWW-Authenticate. Si pones oauth2-proxy delante,
-   `docker pull` deja de funcionar. Zot mantiene su `htpasswd` propio
-   (gestionado por cloud-init).
-3. **`/healthz`** en el apex — endpoint trivial para monitores de
+   `docker pull` deja de funcionar. **Desde 2026-05** Zot gestiona su
+   propia auth dual: navegadores via Dex (OIDC), OCI clients via API
+   keys generadas desde la UI tras el primer login. Ver sección
+   ["Zot authentication"](#zot-authentication) más abajo.
+3. **`dex.platform...` (Dex)** — Dex *es* la auth, ponerle gate delante
+   sería circular. Caddy es un reverse proxy transparente.
+4. **`/healthz`** en el apex — endpoint trivial para monitores de
    uptime externos. Devuelve `200 ok` sin auth.
-4. **`/oauth2/*`** — el propio flujo de login (start, callback,
+5. **`/oauth2/*`** — el propio flujo de login (start, callback,
    sign_in, sign_out) debe ser público para que la ronda con GitHub
    funcione.
 
@@ -217,6 +221,143 @@ ignora — no las propaga al log de queries. Para auditar "quién
 consultó qué" hay que mirar los logs de Caddy (en stdout, JSON
 formato), filtrando por `host:logs.platform...` + path
 `/loki/api/v1/query*`.
+
+## Zot authentication
+
+Zot (la registry) tiene un modelo de auth **dual** distinto al resto del
+stack, porque ahí conviven dos tipos de cliente:
+
+```
+Browser (operador) ─► Caddy ─► Zot ─OIDC redirect─► Dex ─OAuth─► GitHub
+                                 ▲                    │
+                                 │                    │ (FagorHealthcare org check)
+                                 │                    │
+                                 └──── id_token ─────┘
+                                       + groups claim
+
+docker / oras / kubelet ─► Caddy ─► Zot (HTTP basic: user + API key)
+```
+
+### Por qué dos mecanismos
+
+- Los clientes OCI (docker pull, oras push, kubelet con pull secret, CI
+  runners) hablan **HTTP basic via WWW-Authenticate**. No saben hacer
+  redirecciones OAuth ni guardar cookies. Forzarles OIDC rompe `docker
+  pull` el primer día.
+- Los humanos quieren SSO con su cuenta de GitHub, sin gestionar otra
+  contraseña. Y queremos que el grupo de GitHub controle quién puede
+  push/pull a cada repo.
+- Zot soporta los dos a la vez (`http.auth.openid` + `http.auth.apikey`
+  en `config.json`). Los humanos generan sus propias API keys desde la
+  UI tras el primer login; esas keys son lo que va al pull-secret del
+  cluster y a los GitHub Actions secrets.
+
+### Componentes
+
+- **Dex** (`dexidp/dex:v2.41.1`) corre como broker OIDC en
+  `dex.platform.fmd.fagorhealthcare.com`. Frente a Zot expone un issuer
+  estándar OIDC; por detrás habla con GitHub. Persiste refresh tokens y
+  signing keys en sqlite (volumen `dex_data`) para no rotar las claves
+  en cada restart.
+- **App de GitHub OAuth "FMD Dex"** — DISTINTA de "FMD Platform
+  Observability" que usa oauth2-proxy. Las dos pueden coexistir en la
+  org `FagorHealthcare`. Callback de "FMD Dex":
+  `https://dex.platform.fmd.fagorhealthcare.com/callback`.
+- **Zot** (config en `platform/zot/config.json.tmpl`) declara `oidc`
+  como provider de OpenID y `apikey: true`. El `credentialsFile`
+  (rendered desde `platform/zot/oidc-credentials.json.tmpl`) contiene
+  el secret compartido con el `staticClient` de Dex.
+
+### accessControl en Zot — qué pasa cuando el JWT trae `groups`
+
+Dex pide a GitHub el scope `read:org` y emite en el id_token un claim
+`groups` con la forma `["FagorHealthcare:<team-slug>", ...]` (porque
+`teamNameField: slug` en la config de Dex). Zot lee ese claim y lo
+mapea **directamente** a su modelo de groups en `accessControl.repositories.**.policies`.
+No hay un mapeo intermedio en `accessControl.groups` — el string del
+claim se compara literal contra el campo `groups` de la policy.
+
+Por eso `.env` tiene dos variables que el operador rellena:
+
+```
+ZOT_RW_GROUP=FagorHealthcare:<slug-del-team-RW>     # ej. platform
+ZOT_RO_GROUP=FagorHealthcare:<slug-del-team-RO>     # ej. cluster-pull
+```
+
+Listar slugs reales de la org:
+
+```bash
+gh api orgs/FagorHealthcare/teams --jq '.[] | .slug'
+```
+
+### Cómo registrar la OAuth App "FMD Dex" (paso manual, una vez)
+
+1. `https://github.com/organizations/FagorHealthcare/settings/applications/new`
+2. Datos:
+   - **Application name**: `FMD Dex`
+   - **Homepage URL**: `https://dex.platform.fmd.fagorhealthcare.com`
+   - **Authorization callback URL**:
+     `https://dex.platform.fmd.fagorhealthcare.com/callback`
+3. Tras "Register application", generar un client secret.
+4. Apuntar Client ID + Client Secret en
+   `/opt/platform/.env` del droplet como:
+   ```
+   DEX_GITHUB_CLIENT_ID=...
+   DEX_GITHUB_CLIENT_SECRET=...
+   ```
+5. `DEX_ZOT_CLIENT_SECRET` ya lo generó cloud-init
+   (`openssl rand -hex 32`) y está en `/root/platform-credentials.txt`.
+6. `docker compose up -d --force-recreate dex zot` para que ambos
+   relean el `.env`.
+
+### Generar la primera API key (bootstrap del CI)
+
+Tras el primer despliegue, las API keys aún no existen. El procedimiento:
+
+1. Loguéate como humano en `https://registry.platform.fmd.fagorhealthcare.com/`
+   y pasa por el flujo Dex→GitHub.
+2. En la UI de Zot, panel del usuario → **API Keys** → **Create new**.
+   Dale un label descriptivo (`ci-md-core`, `kubelet-pull`, etc).
+3. Copia la key inmediatamente — Zot solo la muestra una vez.
+4. Para CI: añade la key como GitHub Actions secret en el repo
+   correspondiente. Reemplaza el hardcoded `gailen:873e27e5-…` de
+   `add_tag.sh` por una llamada con esta credencial (PR de
+   seguimiento, uno por servicio).
+5. Para el cluster: regenera el pull-secret con la key. Una sola key
+   "kubelet-pull" basta para todos los Deployments siempre que el
+   `imagePullSecrets` apunte a ese secret.
+
+### Solución de problemas (Zot+Dex)
+
+**Zot no arranca, log dice "openid provider not reachable"** — Dex no
+está respondiendo en su issuer. Mira `docker compose logs dex`.
+Causas típicas: variables `DEX_*` vacías (Dex no arranca), DNS de
+`dex.platform.fmd...` no propagado todavía, o el cert de Caddy aún
+no emitido (la primera vez tarda ~30 s con HTTP-01). El `depends_on:
+dex: { condition: service_healthy }` debería evitar la carrera, pero
+si Dex está mal configurado nunca llega a healthy.
+
+**Login redirige a GitHub y vuelve con "user is not a member of the
+required organization"** — Dex está aplicando el `orgs:
+FagorHealthcare` check. Verifica que el usuario es miembro **público
+o privado** de la org en `https://github.com/orgs/FagorHealthcare/people`.
+Si está pero como invitado, hay que confirmar la invitación.
+
+**Login OK, pero al hacer `docker pull` salen 403** — Zot recibió el
+token, pero el claim `groups` no contenía ni `ZOT_RW_GROUP` ni
+`ZOT_RO_GROUP`. Lista los teams del user:
+
+```bash
+gh api orgs/FagorHealthcare/teams --jq '.[] | .slug'
+gh api /user/teams --jq '.[] | "\(.organization.login):\(.slug)"'
+```
+
+Asegúrate de que el slug exacto coincide con lo que hay en `.env`.
+
+**API key dejó de funcionar** — Zot guarda las keys vinculadas al
+usuario que las creó. Si ese usuario sale de la org en GitHub, su
+sesión OIDC deja de validar y sus API keys quedan huérfanas. Solución:
+re-emitirlas con otro usuario antes de revocar la membresía.
 
 ## Plan de migración al IdP corporativo
 

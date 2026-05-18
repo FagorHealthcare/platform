@@ -196,19 +196,53 @@ platform.fmd.fagorhealthcare.com {
 # ---------------------------------------------------------------------
 # registry.platform.fmd.fagorhealthcare.com → Zot
 #
-# NOTE: Zot stays on its OWN basic_auth (configured in zot/config.json),
-# not on oauth2-proxy. OCI clients (docker, oras, crane) speak HTTP
-# basic auth via WWW-Authenticate negotiation; they don't follow the
-# browser OAuth dance. Forcing oauth2-proxy here would break every
-# `docker pull` from the cluster nodes.
+# Auth is split inside Zot itself (see platform/zot/config.json.tmpl):
+#   - Browser users: OIDC via Dex (GitHub upstream). Zot redirects to
+#     dex.platform... for login; on return, Zot sets its own session
+#     cookie and the user can generate API keys from the UI.
+#   - OCI clients (docker, oras, crane, kubelet): HTTP basic auth with
+#     the user's username + an API key as the password. The API keys
+#     are minted from Zot's UI after the human first logs in via OIDC.
 #
-# OCI clients also require the original Host header to pass through
+# This vhost stays a transparent reverse proxy — no oauth2-proxy gate,
+# no auth header rewriting. The OIDC dance (302 to dex.platform...) is
+# initiated by Zot itself, not by Caddy.
+#
+# OCI clients require the original Host header to pass through
 # unchanged so Zot can issue correct redirects/links.
 # ---------------------------------------------------------------------
 registry.platform.fmd.fagorhealthcare.com {
     reverse_proxy zot:5000 {
         header_up Host {host}
     }
+
+    encode gzip
+
+    log {
+        output stdout
+        format json
+    }
+}
+
+# ---------------------------------------------------------------------
+# dex.platform.fmd.fagorhealthcare.com → Dex
+#
+# Dex IS the auth — gating it behind oauth2-proxy would be circular.
+# Caddy here is a transparent reverse proxy and only adds TLS.
+#
+# This endpoint serves:
+#   - /.well-known/openid-configuration  (discovery; called by Zot at boot)
+#   - /keys                              (JWKS; called by Zot per token)
+#   - /auth                              (browser → GitHub redirect)
+#   - /callback                          (GitHub → Dex callback)
+#   - /token, /userinfo                  (oauth2/oidc protocol endpoints)
+#   - /healthz                           (liveness probe; public is fine)
+#
+# Nothing here is operator-sensitive in a way that warrants
+# additional auth — it's a standard OIDC issuer surface.
+# ---------------------------------------------------------------------
+dex.platform.fmd.fagorhealthcare.com {
+    reverse_proxy dex:5556
 
     encode gzip
 

@@ -1,0 +1,108 @@
+# =====================================================================
+# Dex — OIDC broker for Zot's browser login (GitHub upstream).
+#
+# Rendered into a named volume by the `dex-config-render` init container
+# via envsubst. The placeholders below are interpolated from /opt/platform/.env:
+#
+#   $DEX_GITHUB_CLIENT_ID      — from the GitHub OAuth App "FMD Dex"
+#   $DEX_GITHUB_CLIENT_SECRET  — idem
+#   $DEX_ZOT_CLIENT_SECRET     — shared secret between Dex's static client
+#                                "zot" and Zot's openid credentialsFile.
+#                                Random 32-char hex; operator picks it once.
+#
+# Dex *does* support env-var expansion natively, but only in the storage
+# and connector blocks, and only behind the DEX_EXPAND_ENV feature flag.
+# `staticClients[].secret` is outside that scope, so we render the whole
+# file via envsubst instead of relying on Dex's partial support.
+#
+# Reference: docs/observability-AUTH.md (Zot section)
+#            docs/migration/02-registry.md (Authentication design)
+# =====================================================================
+
+issuer: https://dex.platform.fmd.fagorhealthcare.com
+
+# ---------------------------------------------------------------------
+# Storage — sqlite3 in a docker-managed volume (`dex_data`).
+#
+# Dex needs persistent storage for refresh tokens and (with `oauth2.
+# skipApprovalScreen: false`) consent decisions. For a single-instance
+# deployment, sqlite is the path of least resistance — no Postgres
+# sidecar, no schema migrations on upgrade.
+#
+# The volume is mounted at /var/dex; the sqlite file lives inside.
+# ---------------------------------------------------------------------
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+# ---------------------------------------------------------------------
+# Operators are already gated upstream (GitHub org membership check in
+# the github connector, see below). Skipping Dex's own approval screen
+# avoids a redundant "do you allow Dex to read your profile?" prompt on
+# every first login — the answer is structurally yes for anyone who
+# made it this far.
+# ---------------------------------------------------------------------
+oauth2:
+  skipApprovalScreen: true
+
+# ---------------------------------------------------------------------
+# Upstream connector — GitHub.
+#
+# `orgs: [{ name: FagorHealthcare }]` does TWO things:
+#   1. Restricts authentication to members of the FagorHealthcare GitHub
+#      org. Non-members get an immediate "unauthorized" page from Dex.
+#   2. Loads all teams the user belongs to *within that org* into the
+#      `groups` claim, formatted as "FagorHealthcare:<team-slug>"
+#      (because teamNameField is "slug").
+#
+# Zot's accessControl will then match policy `groups` against those
+# exact strings (see platform/zot/config.json.tmpl).
+#
+# Note: `loadAllGroups: true` is mutually exclusive with `orgs` per Dex
+# docs — using `orgs` already implies "load all teams of this org".
+# ---------------------------------------------------------------------
+connectors:
+  - type: github
+    id: github
+    name: GitHub
+    config:
+      clientID: $DEX_GITHUB_CLIENT_ID
+      clientSecret: $DEX_GITHUB_CLIENT_SECRET
+      redirectURI: https://dex.platform.fmd.fagorhealthcare.com/callback
+      orgs:
+        - name: FagorHealthcare
+      teamNameField: slug
+      useLoginAsID: false
+
+# ---------------------------------------------------------------------
+# Downstream client — Zot.
+#
+# `redirectURIs` MUST match exactly what Zot generates when it kicks
+# off the OIDC flow. Zot's callback path is `/auth/callback/<provider>`,
+# where <provider> is the key under `http.auth.openid.providers` in
+# Zot's config. We named it `oidc` there, so the URI here is
+# `/auth/callback/oidc`.
+#
+# The shared secret is the same value placed in Zot's
+# `oidc-credentials.json` (rendered alongside Zot's config).
+# ---------------------------------------------------------------------
+staticClients:
+  - id: zot
+    name: Zot Registry
+    redirectURIs:
+      - https://registry.platform.fmd.fagorhealthcare.com/auth/callback/oidc
+    secret: $DEX_ZOT_CLIENT_SECRET
+
+# Enforce that all signed claims expire — refresh token lifetime caps
+# how long a stale browser session can keep refreshing without a fresh
+# trip through GitHub.
+expiry:
+  signingKeys: 6h
+  idTokens: 24h
+  refreshTokens:
+    validIfNotUsedFor: 168h   # 7 days idle → expire
+    absoluteLifetime: 720h    # 30 days max
