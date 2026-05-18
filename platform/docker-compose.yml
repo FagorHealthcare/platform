@@ -269,10 +269,11 @@ services:
     env_file: .env
     expose:
       - "4180"
-    volumes:
-      # Email allowlist — mounted read-only so a HUP reload reads the
-      # latest disk contents.
-      - ./oauth2-proxy/emails.txt:/etc/oauth2-proxy/emails.txt:ro
+    # No `volumes:` block — the FagorHealthcare GitHub org IS the
+    # source of truth for who can log in. Add/remove people via
+    # https://github.com/orgs/FagorHealthcare/people; the proxy
+    # picks up the change on the next login attempt (the failed
+    # attempt would already get 403 if removed mid-session).
     command:
       - --provider=github
       - --client-id=${OAUTH2_CLIENT_ID}
@@ -297,8 +298,12 @@ services:
       # generated redirects use https:// not http://.
       - --force-https=false
       - --skip-provider-button=true
-      # Allowlist source of truth.
-      - --authenticated-emails-file=/etc/oauth2-proxy/emails.txt
+      # Authentication is gated by GitHub org membership ONLY
+      # (--github-org below). No per-email allowlist — see the
+      # comments above the service block. To revert to a per-email
+      # allowlist later, add back:
+      #   - --authenticated-emails-file=/etc/oauth2-proxy/emails.txt
+      # and the matching volume mount.
       # Scopes:
       #   read:user — public profile
       #   user:email — required when the GitHub primary email is
