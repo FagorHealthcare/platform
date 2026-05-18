@@ -17,4 +17,5 @@
 # In addition to this allowlist, oauth2-proxy enforces membership in
 # the FagorHealthcare GitHub org (--github-org flag). Both checks must
 # pass for a session to be created. Defense in depth.
+jorge.uriarte@omelas.net
 jorge.uriarte@gailen.es
