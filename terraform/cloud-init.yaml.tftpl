@@ -241,6 +241,15 @@ write_files:
         # template. Cloud-init will leave them blank if absent; the
         # oauth2-proxy container then refuses to start with a clear
         # "client id required" error.
+        # Dex<->Zot static client secret. Random 32 bytes hex; written
+        # here once and never rotated unless the operator decides to.
+        # If you change this value you must restart BOTH dex and zot
+        # (both read it: dex from its rendered config, zot from its
+        # rendered oidc-credentials.json) — and any active session
+        # cookies become invalid.
+        log "generating dex<->zot static client secret"
+        DEX_ZOT_CLIENT_SECRET=$(openssl rand -hex 32)
+
         {
           echo ""
           echo "# Caddy basic_auth for logs.platform.fmd.* (Vector -> Loki)"
@@ -253,6 +262,21 @@ write_files:
           echo "OAUTH2_CLIENT_ID="
           echo "OAUTH2_CLIENT_SECRET="
           echo "OAUTH2_COOKIE_SECRET='$OAUTH2_COOKIE_SECRET'"
+          echo ""
+          echo "# Dex — separate GitHub OAuth App 'FMD Dex' (callback at"
+          echo "#   https://dex.platform.fmd.fagorhealthcare.com/callback)."
+          echo "# DEX_ZOT_CLIENT_SECRET was just generated; DEX_GITHUB_*"
+          echo "# you must paste from the GitHub OAuth App registration."
+          echo "DEX_GITHUB_CLIENT_ID="
+          echo "DEX_GITHUB_CLIENT_SECRET="
+          echo "DEX_ZOT_CLIENT_SECRET='$DEX_ZOT_CLIENT_SECRET'"
+          echo ""
+          echo "# Zot accessControl — GitHub team slugs that grant"
+          echo "# read+write and read-only on the registry. Format that"
+          echo "# Dex emits is 'FagorHealthcare:<slug>'."
+          echo "# List existing teams with: gh api orgs/FagorHealthcare/teams"
+          echo "ZOT_RW_GROUP=FagorHealthcare:platform"
+          echo "ZOT_RO_GROUP=FagorHealthcare:cluster-pull"
         } >> "$ENV_REAL"
 
         umask 077
@@ -277,6 +301,15 @@ write_files:
       OAUTH2_COOKIE_SECRET=$OAUTH2_COOKIE_SECRET
       # CLIENT_ID / CLIENT_SECRET: edit /opt/platform/.env to fill these in
       # from the GitHub OAuth App "FMD Platform Observability".
+
+      # dex (Zot OIDC broker)
+      DEX_ZOT_CLIENT_SECRET=$DEX_ZOT_CLIENT_SECRET
+      # DEX_GITHUB_CLIENT_ID / DEX_GITHUB_CLIENT_SECRET: edit
+      # /opt/platform/.env to fill these in from a SEPARATE GitHub OAuth
+      # App "FMD Dex" with callback URI:
+      #   https://dex.platform.fmd.fagorhealthcare.com/callback
+      # Also confirm ZOT_RW_GROUP / ZOT_RO_GROUP values in /opt/platform/.env
+      # match real FagorHealthcare team slugs.
       EOF
         chmod 0600 "$CREDS_FILE"
         log "credentials written to $CREDS_FILE (capture this!)"

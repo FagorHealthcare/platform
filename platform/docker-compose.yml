@@ -5,15 +5,24 @@
 # Services:
 #   - caddy        : TLS edge (Let's Encrypt) for *.platform.fmd.fagorhealthcare.com
 #   - zot          : OCI registry (LOCAL disk on droplet, Trivy CVE scanning;
-#                    nightly rclone mirror to DO Spaces handled by md-backup)
+#                    nightly rclone mirror to DO Spaces handled by md-backup).
+#                    Browser users auth via Dex (OIDC), OCI clients via API
+#                    keys (HTTP basic).
+#   - dex          : OIDC broker — fronts GitHub for Zot's browser login.
+#                    Issues short-lived id_tokens with FagorHealthcare org
+#                    team groups in the `groups` claim, which Zot's
+#                    accessControl uses to gate repository actions.
 #   - loki         : log aggregator (S3 backend → DO Spaces, 365-day retention)
 #   - alertmanager : routes/dedup alerts emitted by Loki Ruler
 #   - perses       : LogQL dashboards (file-provisioned, no DB)
+#   - oauth2-proxy : GitHub OAuth gate for the apex / logs / alerts /
+#                    dashboards vhosts (separate from Dex — Dex is the
+#                    Zot-specific broker, oauth2-proxy is the everywhere-
+#                    else session layer).
 #
-# Caddy is the ONLY service that publishes ports on the host. Zot and
-# Loki are reachable only via the internal `platform` bridge network.
-# Auth (htpasswd for Zot, basic-auth headers for Loki/Vector) is handled
-# inside each service.
+# Caddy is the ONLY service that publishes ports on the host. Every
+# backend (Zot, Dex, Loki, Alertmanager, Perses, oauth2-proxy) is
+# reachable only via the internal `platform` bridge network.
 #
 # Reference: docs/migration/06-platform-tier.md
 # =====================================================================
@@ -26,11 +35,17 @@ volumes:
   caddy_data:        # ACME certificates + state — persists across restarts
   caddy_config:      # Caddy autosaved/admin config
   loki_wal:          # Loki WAL + tsdb local index cache
-  zot_rendered:      # Rendered (envsubst'd) zot config — written by init
+  zot_rendered:      # Rendered (envsubst'd) zot config + oidc credentials
+                     # — written by zot-config-render init.
   zot_data:          # OCI registry blobs + index. Local fs (CVE scanning
                      # requires real POSIX storage; S3 backend is rejected
                      # by Zot's validator). Mirrored nightly to Spaces by
                      # md-backup. See docs/migration/02-registry.md.
+  dex_rendered:      # Rendered (envsubst'd) dex config — written by
+                     # dex-config-render init.
+  dex_data:          # Dex sqlite3 storage (refresh tokens, signing keys).
+                     # Persists across restarts so users don't get
+                     # logged out and signing keys remain stable.
   alertmanager_data: # Silences + notification log. Ephemeral by nature
                      # (lost silences can be recreated); not Spaces-backed.
   perses_data:       # File-based Perses runtime cache. Source of truth is
@@ -77,6 +92,8 @@ services:
         condition: service_started
       oauth2-proxy:
         condition: service_started
+      dex:
+        condition: service_healthy
     healthcheck:
       # Caddy's admin API listens on 127.0.0.1:2019 (IPv4-only) inside the
       # container. busybox `wget` resolves `localhost` to ::1 first and gets
@@ -105,6 +122,7 @@ services:
     env_file: .env
     volumes:
       - ./zot/config.json.tmpl:/in/config.json.tmpl:ro
+      - ./zot/oidc-credentials.json.tmpl:/in/oidc-credentials.json.tmpl:ro
       - zot_rendered:/out
     command:
       - /bin/sh
@@ -112,9 +130,16 @@ services:
       - |
         set -eu
         apk add --no-cache gettext >/dev/null
+        # Main config — substitutes $${ZOT_RW_GROUP} and $${ZOT_RO_GROUP}
+        # (operator-supplied team slugs, see .env.example).
         envsubst < /in/config.json.tmpl > /out/config.json
         chmod 0444 /out/config.json
-        echo "rendered /out/config.json"
+        # OIDC client credentials — shared secret between Dex's
+        # staticClient "zot" and this credentialsFile. Read-only to
+        # the zot user (uid 1000 in the upstream image).
+        envsubst < /in/oidc-credentials.json.tmpl > /out/oidc-credentials.json
+        chmod 0400 /out/oidc-credentials.json
+        echo "rendered /out/config.json + /out/oidc-credentials.json"
     restart: "no"
 
   # -------------------------------------------------------------------
@@ -147,8 +172,87 @@ services:
     depends_on:
       zot-config-render:
         condition: service_completed_successfully
+      # Zot validates its OIDC issuer URL at startup (HEAD on
+      # /.well-known/openid-configuration). Without Dex up first, Zot
+      # logs "openid provider not reachable" and refuses to serve.
+      dex:
+        condition: service_healthy
     # No healthcheck: the upstream zot image is distroless (no wget/sh,
     # no curl). End-to-end health is monitored externally via Caddy.
+
+  # -------------------------------------------------------------------
+  # dex-config-render — init container.
+  #
+  # Same pattern as zot-config-render: envsubst the secret placeholders
+  # from .env into dex/config.yaml.tmpl, write the rendered result into
+  # the `dex_rendered` named volume that the `dex` service mounts read-
+  # only at /etc/dex.
+  #
+  # Why a separate render step (vs Dex's native DEX_EXPAND_ENV feature
+  # flag): that feature only expands env vars inside the `storage` and
+  # `connectors` blocks. `staticClients[].secret` (which we need for the
+  # Zot↔Dex shared secret) is OUTSIDE that scope, so the partial native
+  # support doesn't cover us. envsubst on the full file is uniform and
+  # mirrors how Zot's config is produced.
+  # -------------------------------------------------------------------
+  dex-config-render:
+    image: alpine:3.20
+    env_file: .env
+    volumes:
+      - ./dex/config.yaml.tmpl:/in/config.yaml.tmpl:ro
+      - dex_rendered:/out
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        apk add --no-cache gettext >/dev/null
+        envsubst < /in/config.yaml.tmpl > /out/config.yaml
+        chmod 0400 /out/config.yaml
+        echo "rendered /out/config.yaml"
+    restart: "no"
+
+  # -------------------------------------------------------------------
+  # Dex — OIDC broker. Sits in front of GitHub for Zot's browser login.
+  #
+  # Architecture:
+  #   browser → Zot (UI) → redirect → Dex → redirect → GitHub
+  #                                                 ↓
+  #                                          (org/team check by Dex)
+  #                                                 ↓
+  #                            ← Dex ← callback ← GitHub
+  #              cookie set, id_token issued to Zot
+  #
+  # OCI clients (docker, oras, kubelet pull secrets, CI) do NOT pass
+  # through Dex — they speak HTTP basic auth with API keys generated
+  # from Zot's UI after the human first logs in. See pillar 02 doc.
+  #
+  # Healthcheck: Dex publishes a /healthz endpoint (HTTP 200 = OK).
+  # Image is Alpine-based, so wget is available.
+  # -------------------------------------------------------------------
+  dex:
+    image: dexidp/dex:v2.41.1
+    restart: unless-stopped
+    expose:
+      - "5556"
+    volumes:
+      - dex_rendered:/etc/dex:ro
+      - dex_data:/var/dex
+    command:
+      - dex
+      - serve
+      - /etc/dex/config.yaml
+    networks:
+      - platform
+    depends_on:
+      dex-config-render:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "--timeout=5", "http://localhost:5556/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # -------------------------------------------------------------------
   # Loki — monolithic mode. S3-backed chunks (DO Spaces), tsdb index
