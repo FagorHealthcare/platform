@@ -51,8 +51,12 @@
         }
     }
 
-    # Everything else is gated.
-    forward_auth oauth2-proxy:4180 {
+    # Everything else is gated EXCEPT the public probes. The matcher
+    # below intentionally excludes /healthz so external uptime monitors
+    # can probe without OAuth. Any host that imports this snippet gets
+    # the same /healthz exemption for free.
+    @needs_auth not path /healthz
+    forward_auth @needs_auth oauth2-proxy:4180 {
         uri /oauth2/auth
         copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Preferred-Username
 
