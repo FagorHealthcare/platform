@@ -130,8 +130,10 @@ services:
       - |
         set -eu
         apk add --no-cache gettext >/dev/null
-        # Main config — substitutes $${ZOT_RW_GROUP} and $${ZOT_RO_GROUP}
-        # (operator-supplied team slugs, see .env.example).
+        # Main config — no envsubst variables today (accessControl uses
+        # defaultPolicy, see .env.example). Kept through envsubst for
+        # symmetry with the OIDC credentials file and so future template
+        # variables can be added without touching the init container.
         envsubst < /in/config.json.tmpl > /out/config.json
         chmod 0444 /out/config.json
         # OIDC client credentials — shared secret between Dex's

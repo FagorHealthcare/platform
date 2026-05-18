@@ -28,17 +28,8 @@
     "accessControl": {
       "repositories": {
         "**": {
-          "policies": [
-            {
-              "groups": ["${ZOT_RW_GROUP}"],
-              "actions": ["read", "create", "update", "delete"]
-            },
-            {
-              "groups": ["${ZOT_RO_GROUP}"],
-              "actions": ["read"]
-            }
-          ],
-          "defaultPolicy": [],
+          "policies": [],
+          "defaultPolicy": ["read", "create", "update", "delete"],
           "anonymousPolicy": []
         }
       }

@@ -270,13 +270,10 @@ write_files:
           echo "DEX_GITHUB_CLIENT_ID="
           echo "DEX_GITHUB_CLIENT_SECRET="
           echo "DEX_ZOT_CLIENT_SECRET='$DEX_ZOT_CLIENT_SECRET'"
-          echo ""
-          echo "# Zot accessControl — GitHub team slugs that grant"
-          echo "# read+write and read-only on the registry. Format that"
-          echo "# Dex emits is 'FagorHealthcare:<slug>'."
-          echo "# List existing teams with: gh api orgs/FagorHealthcare/teams"
-          echo "ZOT_RW_GROUP=FagorHealthcare:platform"
-          echo "ZOT_RO_GROUP=FagorHealthcare:cluster-pull"
+          # No ZOT_RW_GROUP / ZOT_RO_GROUP — Zot uses defaultPolicy
+          # (every authenticated user gets RW). Dex's org check is the
+          # only gate. See .env.example for how to switch to team-based
+          # filtering if/when FagorHealthcare gets GitHub teams.
         } >> "$ENV_REAL"
 
         umask 077
@@ -308,8 +305,6 @@ write_files:
       # /opt/platform/.env to fill these in from a SEPARATE GitHub OAuth
       # App "FMD Dex" with callback URI:
       #   https://dex.platform.fmd.fagorhealthcare.com/callback
-      # Also confirm ZOT_RW_GROUP / ZOT_RO_GROUP values in /opt/platform/.env
-      # match real FagorHealthcare team slugs.
       EOF
         chmod 0600 "$CREDS_FILE"
         log "credentials written to $CREDS_FILE (capture this!)"
