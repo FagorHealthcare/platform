@@ -1,6 +1,11 @@
 # Pillar 02 — Self-hosted Image Registry
 
-Status: **proposed** | Estimated savings: **~$0/mo** (gains scanning + ends hardcoded creds) | Effort: **~1 day** | Risk: **medium** | Depends on: **[06-platform-tier.md](06-platform-tier.md)** (registry runs on the platform droplet)
+Status: **deployed since 2026-05-07 — service CI/CD cutover pending** (verified 2026-05-18) | Estimated savings: **~$0/mo** (gains scanning + ends hardcoded creds) | Effort: **~1 day** | Risk: **medium** | Depends on: **[06-platform-tier.md](06-platform-tier.md)** (registry runs on the platform droplet)
+
+Current state (verified):
+- Zot `v2.1.16-fhpatch` runs on `md-platform` droplet at `registry.platform.fmd.fagorhealthcare.com`. CVE scanning active, basic_auth via htpasswd. Local disk + nightly rclone mirror to Spaces.
+- `md-backup` already pushes to Zot.
+- **Service CI/CD (md-core, md-auth, md-pwa, md-resi-back, md-resi-front) still pushes to DockerHub `gailen/*`.** `add_tag.sh` in each repo's `.github/workflows/` still carries the hardcoded `gailen:873e27e5-…` credential — the deuda de seguridad listed in CLAUDE.md persists until this cutover lands.
 
 Replace DockerHub (`gailen/*`) with **Zot**, a CNCF-sandbox single-binary
 OCI registry, backed by **DigitalOcean Spaces** (S3-compatible) for

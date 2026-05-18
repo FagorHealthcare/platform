@@ -6,9 +6,13 @@ registry, fewer hardcoded credentials, off-cloud log archive) and the
 reliability posture (no more silent log-ingest drops, controlled
 retention).
 
-Status: **proposed**. Nothing in here has been executed. Each pillar is
-a self-contained file that can be picked up and worked on independently,
-but some unblock others — see "Sequencing" below.
+Status (as of 2026-05-18): **mostly done**. Pillars 01, 03, 04, 05, 06
+complete; pillar 02 (Zot) is deployed but the service-CI/CD cutover off
+DockerHub is still pending. Cost is at **~€263/mo** vs the **~€355/mo**
+baseline — **−€92/mo (−26%)** — and reaches the original plan's −27%
+target as soon as pillar 02 finishes. Per-pillar status fields in each
+file below reflect actual state. The "Sequencing" diagram is preserved
+for historical context.
 
 ## Current monthly cost
 
@@ -50,22 +54,25 @@ credential in `add_tag.sh`, gaining 365-day controlled log retention,
 and putting platform services on a dedicated host with terraformed IaC
 and dual-cloud DR.
 
-### Final-state cost breakdown
+### Cost breakdown — actual, 2026-05-18
 
-| Item | Monthly |
-|---|---|
-| `md-dev-cluster` rightsized | $48 |
-| `md-pre-cluster` rightsized | $72 |
-| Load balancers (4×) | $48 |
-| Postgres (dev + pre) | $75 |
-| PVCs | $1.50 |
-| Platform droplet | $24 |
-| Droplet weekly snapshot | $3 |
-| Spaces (registry + logs) | $5 |
-| AWS S3 IA backup | ~$1 |
-| DockerHub (canceled) | $0 |
-| AWS ES (canceled) | $0 |
-| **Total** | **~$278/mo** |
+| Item | Monthly | Notes |
+|---|---|---|
+| `md-dev-cluster` (`2× s-2vcpu-4gb`) | $48 | pool `md-dev-v2` |
+| `md-pre-cluster` (`3× s-2vcpu-4gb`) | $72 | pool `md-pre-v2`, was `c-2 × 3` ($126) until 2026-05-18 |
+| Load balancers (4×) | $48 | unchanged from baseline |
+| Postgres (dev + pre) | $75 | unchanged from baseline |
+| PVCs | $2 | 4× 5GiB (NodeRed, n8n, etc.) |
+| Platform droplet (`md-platform`) | $24 | `s-2vcpu-4gb`, reserved IP `157.245.25.119` |
+| Droplet weekly snapshot | $3 | |
+| Spaces (registry + logs) | ~$5 | |
+| AWS S3 IA backup mirror | ~$1 | |
+| DockerHub (still in use by CI) | ~$10 | pillar 02 cutover pending |
+| AWS ES (deleted 2026-05-18) | $0 | was $77 |
+| **Total** | **~$288/mo** | vs baseline $390 → **−$102/mo (−26%)** |
+
+After pillar 02 finishes (CI/CD cuts over to Zot, DockerHub canceled):
+**~$278/mo**, exactly the original target.
 
 ## What we are NOT doing and why
 

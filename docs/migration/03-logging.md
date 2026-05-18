@@ -1,6 +1,12 @@
 # Pillar 03 — Vector → Loki
 
-Status: **proposed** | Estimated savings: **−$70/mo (~€65)** | Effort: **~1 day implementation + 30 days parallel run** | Risk: **low–medium** | Depends on: **[06-platform-tier.md](06-platform-tier.md)** (Loki runs on the platform droplet)
+Status: **done 2026-05-18** | Actual savings: **−$77/mo** (AWS ES domain deleted) | Effort: **~1 day implementation + 10 days parallel-run (cut short)** | Risk: **low–medium** | Depends on: **[06-platform-tier.md](06-platform-tier.md)** (Loki runs on the platform droplet)
+
+Final state:
+- Vector dual-sink ran in both clusters from 2026-05-08 to 2026-05-18 (10 days, not the originally planned 30). Loki ingest was reliable for the whole window and operators were already querying it from `logs.platform.fmd.fagorhealthcare.com`.
+- ES sink (`gailen_elk_dev`) removed from both Vector configs on 2026-05-18 (k8s repo PR `FagorHealthcare/k8s#2`, commit `9703589`). Hardcoded `dev-elk:_d3vELK_` credentials no longer in the repo.
+- AWS Elasticsearch domain `search-dev-elk-kcc2j6epnfz4yivbsu2qyd3mye.eu-west-1` deleted via `aws es delete-elasticsearch-domain` on 2026-05-18. Billing stops as soon as AWS finishes the teardown (usually within an hour).
+- Loki is now the only persistent log sink.
 
 Replace the AWS Elasticsearch sink with a self-hosted **Grafana Loki**
 instance backed by DO Spaces. Loki runs as a service in the platform

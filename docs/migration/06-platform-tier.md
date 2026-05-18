@@ -1,6 +1,14 @@
 # Pillar 06 — Platform Tier (Dedicated Droplet)
 
-Status: **proposed** | Estimated savings: **−€48/mo** (replaces AWS ES) | Setup cost: **~€25/mo** (droplet + snapshot + Spaces) | Effort: **~3 days** | Risk: **low** | Depends on: **none** (but is a prerequisite for 02 and 03)
+Status: **done 2026-05-07** (and built well beyond original scope — see "Delivered" below) | Actual cost: **~€25-30/mo** (droplet + snapshot + Spaces) | Effort: **~3 days initial + ongoing iteration** | Risk: **low** | Depends on: **none** (but is a prerequisite for 02 and 03)
+
+**Delivered** (as of 2026-05-18):
+- Terraform-provisioned Debian droplet `md-platform` (`s-2vcpu-4gb`, reserved IP `157.245.25.119`), DO Spaces buckets, DNS zone `*.platform.fmd.fagorhealthcare.com`, weekly snapshot.
+- `docker compose` stack: Caddy (TLS edge, Let's Encrypt HTTP-01), Zot (registry), Loki, Alertmanager (Slack-wired to `#circupack`), Perses (dashboards), oauth2-proxy (GitHub auth, org-membership gate).
+- Unified portal at the apex (`platform.fmd.fagorhealthcare.com/`) showing cluster + platform service health + active alerts.
+- LogQL explorer at `logs.platform.fmd.fagorhealthcare.com/` with parsed-JSON rendering, click-to-expand, and saved views in localStorage.
+- Loki Ruler with seven alerts wired through Alertmanager to Slack.
+- Operator access: GitHub-org gate (`FagorHealthcare`), 168h session cookie, SSO across every `*.platform` subdomain.
 
 A dedicated **single Debian droplet** running `docker compose` hosts the
 shared platform services (Caddy, Zot, Loki — and any future cross-cluster

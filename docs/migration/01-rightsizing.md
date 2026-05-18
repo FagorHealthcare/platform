@@ -1,6 +1,23 @@
 # Pillar 01 — Rightsizing
 
-Status: **proposed** | Estimated savings: **−$54/mo (~€50)** | Effort: **~1h** | Risk: **low** | Depends on: **none**
+Status: **done 2026-05-18** | Actual savings: **−$54/mo** | Effort: **~30min execution** | Risk: **low (rolling, PDB-respected)** | Depends on: **none**
+
+- Dev cluster: consolidated to `2× s-2vcpu-4gb` (was `4× s-1vcpu-2gb`). Same total memory and same cost; fewer nodes, less per-node overhead. Pool `md-dev-v2`.
+- Pre cluster: migrated to `3× s-2vcpu-4gb` (was `3× c-2`). Pool `md-pre-v2`. The old `md-pre` pool is deleted. **Saves $54/mo** ($126 → $72).
+
+Execution notes (kept here as a runbook for the next time we resize):
+
+1. `doctl kubernetes cluster node-pool create md-pre-cluster --name md-pre-v2 --size s-2vcpu-4gb --count 3`
+2. Wait for all three new nodes `Ready`.
+3. Before draining, scale `ingress-nginx-controller` from 1 → 2 replicas so the eviction window doesn't blackhole HTTP traffic. The second replica auto-schedules onto the new pool.
+4. `kubectl drain` each old node one at a time, `--ignore-daemonsets --delete-emptydir-data --grace-period=60`. Drain order matters when 1-replica services with PVCs are involved — drain nodes with no critical singletons first; leave the node(s) hosting `md-node-red-0` and `md-n8n-0` for last so the PVC detach/reattach windows are sequential, not stacked.
+5. `doctl kubernetes cluster node-pool delete md-pre-cluster <old-pool-id> --force` once `kubectl get nodes` shows the old nodes gone.
+6. The DOKS pool delete is reflected in the `doctl` API view ~20-30s later.
+
+Observed app-side impact during the migration:
+- All 4 Quarkus apps (md-core, md-auth, md-resi-back, md-resi-front) stayed `1/N Ready` end-to-end thanks to PDB `minAvailable=1`. 40/40 ingress health probes passed after the final pool delete.
+- `md-node-red-0` and `md-n8n-0` had ~1 minute of downtime each while their PVCs reattached on the new node. Acceptable; Delphi pharmacies retry the `/vN/actualizacion` endpoint.
+- One brief md-core 503 window after drain 2 — caused by the broken-MQTT pod left over from before the migration, healed automatically when that pod was evicted in drain 3.
 
 The cheapest, most boring, most reversible pillar. Almost entirely
 `kubectl scale` and DOKS node-pool resizes — no new components, no
