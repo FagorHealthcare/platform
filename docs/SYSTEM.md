@@ -86,6 +86,8 @@ External integrations:
 
 ### D. Pharmacy onboarding via Cinfa
 
+> ⚠️ **Posiblemente incorrecto (revisado 2026-10-01, sin confirmar).** El código observado sugiere otro flujo: la farmacia pide el alta vía `POST /fmd/activation` (md-auth, guarda el código SAP como `externalId` y marca `external_pending`), recibe código por email, y en la primera subida de datos del FMD (`md-resi-back` `FmdController.upload`) se llama a `CinfaCommunityService.activarFarmaciaPendiente`, que hace un `PATCH` a `Account.Cinfa_TipoServicioMedicalDispenser__c = "Cloud"` en Salesforce. `POST /cinfa/activate/{cinfaCode}` no crea usuarios: solo hace ese `PATCH`. No se descarta que existan escenarios en los que lo descrito abajo aplique. Además, hasta octubre de 2026 el token OAuth se pedía con `grant_type=password`, no `client_credentials` (cambio exigido por Salesforce a partir del 10/10/2026).
+
 1. Pharmacy accepts in Cinfa Salesforce → triggers webhook
 2. `md-auth` `POST /cinfa/activate/{cinfaCode}` creates pharmacy user
 3. md-auth obtains OAuth token from `cinfa.lightning.force.com/services` using client_credentials
