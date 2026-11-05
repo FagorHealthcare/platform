@@ -95,3 +95,16 @@ queries:
     cluster: pre
     file: pre/patient-onboarding-events.yaml
     summary: tokens de activación + asignaciones de dispositivo
+
+  # ------ backups ---------------------------------------------------
+  - id: backup-failed
+    cluster: pre
+    file: pre/backup-failed.yaml
+    summary: md-backup reported BACKUP_FAILED (alert-only)
+    motivated_by: backup failures 2026-11-05
+
+  - id: backup-missing
+    cluster: pre
+    file: pre/backup-missing.yaml
+    summary: no BACKUP_OK from md-backup in 26h (alert-only)
+    motivated_by: backup failures 2026-11-05
