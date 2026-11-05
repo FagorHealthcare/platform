@@ -1,0 +1,26 @@
+id: backup-failed
+title: md-backup failed step
+description: |
+  El backup de producción ha terminado con un error controlado.
+  startup.sh escribe BACKUP_FAILED step=<mount|k8s|pg|rdiff> al fallar
+  un paso. El contenedor sale con 1 y Kubernetes lo reintenta, así que
+  la alerta puede resolverse sola si un reintento llega a BACKUP_OK.
+  El paso concreto está en los logs de {container="md-backup"}.
+runbook: docs/OPERATIONS.md
+
+cluster: pre
+
+expr: |
+  sum(count_over_time({cluster="pre", container="md-backup"}
+                      |= "BACKUP_FAILED" [1h]))
+
+unit: events/h
+
+threshold:
+  warning: 0
+
+alert:
+  name: BackupFailedPre
+  for: 0m
+  severity: critical
+  summary: El backup de producción ha fallado

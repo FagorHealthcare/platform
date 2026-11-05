@@ -265,3 +265,12 @@ done
 # Tail prod logs from md-core
 kubectl logs -f -l app=md-core --tail=100
 ```
+
+## Alertas de backup (`BackupFailedPre`, `BackupMissingPre`)
+
+`md-backup` escribe en su log `BACKUP_OK` si todos los pasos terminan bien, o `BACKUP_FAILED step=<mount|k8s|pg|rdiff>` si falla uno. Loki Ruler evalúa ambas cadenas.
+
+- **`BackupFailedPre`:** el paso que falló está en los logs del contenedor `md-backup`. Kubernetes reintenta el job, y la alerta se resuelve una hora después de la última línea de fallo.
+- **`BackupMissingPre`:** no hay `BACKUP_OK` en 26 h. Revisar por este orden: `kubectl get cronjob md-backup-cronjob` (¿suspendido?), estado del último job y sus pods (¿`OOMKilled`, `ImagePullBackOff`?) y envío de logs desde Vector.
+
+Las alertas indican que el proceso terminó, no que la copia se pueda restaurar. Si se desactiva el backup a propósito, hay que silenciar `BackupMissingPre` en Alertmanager.

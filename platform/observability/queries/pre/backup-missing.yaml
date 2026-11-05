@@ -1,0 +1,28 @@
+id: backup-missing
+title: md-backup without success in 26h
+description: |
+  No consta ningún BACKUP_OK en 26 h. El backup corre a las 03:00 UTC y
+  tarda unos 17 min, por lo que el margen cubre una ejecución fallida.
+  Es la alerta que detecta lo que no deja error en el log: OOM, pod que
+  no arranca, CronJob suspendido o logs que no llegan a Loki. Depende de
+  la imagen de md-backup que escribe el marcador: no desplegar la regla
+  antes que la imagen o saltará en falso.
+  No garantiza que la copia sea restaurable.
+runbook: docs/OPERATIONS.md
+
+cluster: pre
+
+expr: |
+  absent_over_time({cluster="pre", container="md-backup"}
+                   |= "BACKUP_OK" [26h])
+
+unit: boolean
+
+threshold:
+  warning: 0
+
+alert:
+  name: BackupMissingPre
+  for: 0m
+  severity: critical
+  summary: Sin backup correcto de producción en 26 h

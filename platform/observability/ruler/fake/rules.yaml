@@ -96,3 +96,39 @@ groups:
         Baseline observado el 9-may: ~27 eventos/12h (~0.0006 req/s).
         Umbral > 0.02 req/s (= 6 en 5 min) ≈ 30x baseline.
       runbook: docs/loki/queries.md
+  - alert: BackupFailedPre
+    expr: |-
+      sum(count_over_time({cluster="pre", container="md-backup"}
+                          |= "BACKUP_FAILED" [1h])) > 0
+    for: 0m
+    labels:
+      severity: critical
+      cluster: pre
+    annotations:
+      summary: El backup de producción ha fallado
+      description: |-
+        El backup de producción ha terminado con un error controlado.
+        startup.sh escribe BACKUP_FAILED step=<mount|k8s|pg|rdiff> al fallar
+        un paso. El contenedor sale con 1 y Kubernetes lo reintenta, así que
+        la alerta puede resolverse sola si un reintento llega a BACKUP_OK.
+        El paso concreto está en los logs de {container="md-backup"}.
+      runbook: docs/OPERATIONS.md
+  - alert: BackupMissingPre
+    expr: |-
+      absent_over_time({cluster="pre", container="md-backup"}
+                       |= "BACKUP_OK" [26h]) > 0
+    for: 0m
+    labels:
+      severity: critical
+      cluster: pre
+    annotations:
+      summary: Sin backup correcto de producción en 26 h
+      description: |-
+        No consta ningún BACKUP_OK en 26 h. El backup corre a las 03:00 UTC y
+        tarda unos 17 min, por lo que el margen cubre una ejecución fallida.
+        Es la alerta que detecta lo que no deja error en el log: OOM, pod que
+        no arranca, CronJob suspendido o logs que no llegan a Loki. Depende de
+        la imagen de md-backup que escribe el marcador: no desplegar la regla
+        antes que la imagen o saltará en falso.
+        No garantiza que la copia sea restaurable.
+      runbook: docs/OPERATIONS.md
