@@ -20,6 +20,10 @@
 #   logs.platform.fmd.fagorhealthcare.com
 #   alerts.platform.fmd.fagorhealthcare.com          (Alertmanager UI)
 #   dashboards.platform.fmd.fagorhealthcare.com      (Perses)
+#   dex.platform.fmd.fagorhealthcare.com             (Dex OIDC broker —
+#                                                     fronts GitHub for
+#                                                     Zot's browser login;
+#                                                     see docs/observability-AUTH.md)
 # =====================================================================
 
 locals {
@@ -31,6 +35,10 @@ locals {
     logs       = "logs.${var.subdomain_label}"
     alerts     = "alerts.${var.subdomain_label}"
     dashboards = "dashboards.${var.subdomain_label}"
+    # Dex OIDC issuer — public discovery endpoint plus the GitHub OAuth
+    # callback URI. Must be HTTPS (Let's Encrypt via Caddy) because Zot
+    # refuses to talk to a non-TLS OIDC issuer.
+    dex = "dex.${var.subdomain_label}"
   }
 }
 

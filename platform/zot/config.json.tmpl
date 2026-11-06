@@ -9,27 +9,28 @@
   "http": {
     "address": "0.0.0.0",
     "port": "5000",
+    "externalUrl": "https://registry.platform.fmd.fagorhealthcare.com",
     "compat": ["docker2s2"],
     "auth": {
-      "htpasswd": {
-        "path": "/etc/zot/htpasswd"
-      },
-      "failDelay": 5
+      "failDelay": 5,
+      "apikey": true,
+      "openid": {
+        "providers": {
+          "oidc": {
+            "name": "FMD Dex",
+            "issuer": "https://dex.platform.fmd.fagorhealthcare.com",
+            "clientid": "zot",
+            "clientsecret": "$DEX_ZOT_CLIENT_SECRET",
+            "scopes": ["openid", "email", "groups"]
+          }
+        }
+      }
     },
     "accessControl": {
       "repositories": {
         "**": {
-          "policies": [
-            {
-              "users": ["ci"],
-              "actions": ["read", "create", "update", "delete"]
-            },
-            {
-              "users": ["cluster"],
-              "actions": ["read"]
-            }
-          ],
-          "defaultPolicy": [],
+          "policies": [],
+          "defaultPolicy": ["read", "create", "update", "delete"],
           "anonymousPolicy": []
         }
       }
