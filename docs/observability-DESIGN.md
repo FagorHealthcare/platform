@@ -143,29 +143,33 @@ The generator is intentionally minimal. It does NOT:
 
 ## Status — what's deployed, what's open
 
-**Deployed on the platform droplet (2026-05-08)**:
+**Deployed on the platform droplet (reviewed 2026-11-06)**:
 
 - Loki Ruler with rules under `/etc/loki/rules/fake/` (mounted from
-  `platform/observability/ruler/`). Reload via
-  `docker compose kill -s HUP loki`.
+  `platform/observability/ruler/`). The ruler re-reads them every
+  `poll_interval` (1 min), so no signal or restart is needed. Confirmed
+  on 2026-11-06 when the backup alerts were loaded with a plain
+  `git pull`.
 - Alertmanager v0.27 at `https://alerts.platform.fmd.fagorhealthcare.com`
-  behind Caddy basic-auth.
+  behind the GitHub OAuth gate (see
+  [observability-AUTH.md](observability-AUTH.md)). It only shows active
+  alerts, not rule definitions.
+- Slack notifications are live: Alertmanager routes every alert to
+  `#alertas`, with `send_resolved: true`. The webhook lives in
+  `platform/alertmanager/slack-webhook.txt` on the droplet.
 - Perses v0.50.2 at `https://dashboards.platform.fmd.fagorhealthcare.com`
-  behind Caddy basic-auth, file-provisioned project + datasource +
+  behind the same OAuth gate, file-provisioned project + datasource +
   dashboards.
+- Droplet layout: the git checkout is `/opt/platform-repo`, currently on
+  `feature/zot-oidc-dex`, not `main`. `/opt/platform/stack` is a symlink
+  to its `platform/` directory. New rules must reach that branch.
 - Day-to-day rule/dashboard updates: edit under `queries/`, run
-  `python render.py`, commit, `git pull` on the droplet,
-  `docker compose kill -s HUP loki`. Perses re-polls
-  provisioning every 1 min — no manual action.
+  `python render.py`, commit, then `git pull --ff-only` in
+  `/opt/platform-repo`. Rules load within a minute and Perses re-polls
+  provisioning every minute, so no manual action is needed.
 
 **Open items**:
 
-- **Slack notifications**: Alertmanager still on `null` receiver. To
-  enable: drop `SLACK_WEBHOOK_URL=…` into `/opt/platform/.env`,
-  uncomment the `slack` block in
-  `platform/alertmanager/alertmanager.yml`, change the `route:
-  receiver:` from `null` to `slack`, then
-  `docker compose up -d alertmanager`.
 - **Multi-cluster**: only `pre` cluster has rules/panels today. Adding
   `dev-0` is mechanical: copy each YAML to `queries/dev-0/`, change
   the cluster label and alert name.
